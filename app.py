@@ -98,6 +98,10 @@ def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
             current_ref = order_match.group(2).strip().split()[0]
             groups.setdefault(current_ref, OrderGroup(current_ref, line, []))
             continue
+        if (current_ref and line.lower().startswith("countermark")
+                and groups[current_ref].items):
+            groups[current_ref].items[-1].description += f"\n{line}"
+            continue
         if not current_ref or not line or line.startswith(SKIP_PREFIXES):
             continue
         item = parse_item(line)

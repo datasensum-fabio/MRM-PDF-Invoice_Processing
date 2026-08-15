@@ -10,6 +10,7 @@ import app as application
 PDF_TEXT = """Invoice #4690899
 Order WEB - Ref : WEB235520.0182
 Hoops earrings pair plain 9K YG 650068.3 1 1,20 t 8,78 9,36 9,36
+Countermark :Dorothy
 Earrings pair w. cult.FWpearl gold plated Brass 135047 1 1,95 a 41,98 41,98 41,98
 Order WEB - Ref : WEB235522.0205 note for warehouse
 Set of 5 925 silver extension chain RALLAG.5 1 2,00 a 15,30 15,30 15,30
@@ -35,6 +36,7 @@ def test_parser_groups_sample_order_and_keeps_all_products():
     assert groups["WEB235520.0182"].label == "Order WEB - Ref : WEB235520.0182"
     assert len(groups["WEB235520.0182"].items) == 2
     assert {item.reference for item in groups["WEB235520.0182"].items} == {"650068.3", "135047"}
+    assert groups["WEB235520.0182"].items[0].description.endswith("\nCountermark :Dorothy")
     assert "WEB235522.0205" in groups
 
 
@@ -68,7 +70,8 @@ def test_process_returns_one_csv_per_order_ref():
     assert "Order WEB - Ref : WEB235520.0182" in sample
     assert selected["preview_rows"][0] == []
     assert selected["preview_rows"][7] == []
-    assert selected["preview_rows"][8][0] == "Hoops earrings pair plain 9K YG"
+    assert selected["preview_rows"][8][0] == "Hoops earrings pair plain 9K YG\nCountermark :Dorothy"
+    assert "Countermark :Dorothy" in sample
     assert "Hoops earrings pair plain 9K YG" in sample
 
 
