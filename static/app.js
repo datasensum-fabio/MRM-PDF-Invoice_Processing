@@ -62,7 +62,7 @@ function showResults(data) {
     url: URL.createObjectURL(csvBlob(file.content_base64)),
     pdfUrl: URL.createObjectURL(decodedBlob(file.pdf_base64, 'application/pdf')),
   }));
-  resultsTitle.textContent = `Invoice #${data.invoice}`;
+  resultsTitle.textContent = `Invoice #${data.invoice} files`;
   resultsSummary.textContent = `${generatedFiles.length} individual CSV ${generatedFiles.length === 1 ? 'file' : 'files'} created.`;
   generatedFiles.forEach(file => {
     const row = document.createElement('div');
