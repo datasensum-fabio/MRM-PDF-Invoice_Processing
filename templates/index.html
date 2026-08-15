@@ -17,8 +17,13 @@
     </label>
 
     <div class="card-head settings"><span>02</span><div><h2>Pricing</h2><p>Review the values used for this invoice.</p></div></div>
+    <div class="last-gold-fix">
+      <span>Last gold fix used</span>
+      <strong id="last-gold-fix">No previous value</strong>
+      <small>For safety, enter the new gold fix manually for every invoice.</small>
+    </div>
     <div class="fields">
-      <label><span>Gold fix price (€)</span><input name="gold_fix" type="number" min="0.01" step="0.01" placeholder="65.20" required></label>
+      <label><span>New gold fix price (€)</span><input id="gold-fix" name="gold_fix" type="number" min="0.01" step="0.01" autocomplete="off" required></label>
       <label><span>Standard markup (%)</span><input name="markup" type="number" min="0" step="0.01" value="35" required></label>
     </div>
     <div class="formula-note">

@@ -9,7 +9,21 @@ const resultsTitle = document.querySelector('#results-title');
 const resultsSummary = document.querySelector('#results-summary');
 const fileList = document.querySelector('#file-list');
 const downloadAll = document.querySelector('#download-all');
+const goldFixInput = document.querySelector('#gold-fix');
+const lastGoldFix = document.querySelector('#last-gold-fix');
+const LAST_GOLD_FIX_KEY = 'comireland-last-gold-fix';
 let generatedFiles = [];
+
+function displayLastGoldFix(value) {
+  const parsed = Number(value);
+  lastGoldFix.textContent = Number.isFinite(parsed) && parsed > 0 ? `€ ${parsed.toFixed(2)}` : 'No previous value';
+}
+
+try {
+  displayLastGoldFix(localStorage.getItem(LAST_GOLD_FIX_KEY));
+} catch {
+  displayLastGoldFix(null);
+}
 
 function clearGeneratedFiles() {
   generatedFiles.forEach(file => URL.revokeObjectURL(file.url));
@@ -84,6 +98,7 @@ downloadAll.addEventListener('click', () => generatedFiles.forEach(triggerDownlo
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
+  const usedGoldFix = goldFixInput.value;
   message.className = 'message';
   message.textContent = 'Reading products and preparing your CSV files…';
   button.disabled = true;
@@ -95,6 +110,13 @@ form.addEventListener('submit', async event => {
       throw new Error(data.error || 'Invoice processing failed.');
     }
     showResults(await response.json());
+    try {
+      localStorage.setItem(LAST_GOLD_FIX_KEY, usedGoldFix);
+    } catch {
+      // The app still works when browser storage is unavailable.
+    }
+    displayLastGoldFix(usedGoldFix);
+    goldFixInput.value = '';
     message.className = 'message success';
     message.textContent = 'Done — choose individual files below or download them all.';
   } catch (error) {
