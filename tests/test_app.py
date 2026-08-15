@@ -14,6 +14,7 @@ Countermark :Dorothy
 Earrings pair w. cult.FWpearl gold plated Brass 135047 1 1,95 a 41,98 41,98 41,98
 Order WEB - Ref : WEB235522.0205 note for warehouse
 Set of 5 925 silver extension chain RALLAG.5 1 2,00 a 15,30 15,30 15,30
+Coll. oz.vert+blc ag925rh 332544.4 1 2,50 a 22,25 22,25 22,25
 """
 
 
@@ -38,6 +39,9 @@ def test_parser_groups_sample_order_and_keeps_all_products():
     assert {item.reference for item in groups["WEB235520.0182"].items} == {"650068.3", "135047"}
     assert groups["WEB235520.0182"].items[0].description.endswith("\nCountermark :Dorothy")
     assert "WEB235522.0205" in groups
+    numeric_reference = groups["WEB235522.0205"].items[1]
+    assert numeric_reference.reference == "332544.4"
+    assert numeric_reference.description == "Coll. oz.vert+blc ag925rh"
 
 
 def test_pricing_formulas():
@@ -65,6 +69,9 @@ def test_process_returns_one_csv_per_order_ref():
     assert selected["filename"] == "invoice_4690899_WEB235520.0182.csv"
     assert selected["item_count"] == 2
     sample = base64.b64decode(selected["content_base64"]).decode("utf-8-sig")
+    pdf = base64.b64decode(selected["pdf_base64"])
+    assert selected["pdf_filename"] == "invoice_4690899_WEB235520.0182.pdf"
+    assert pdf.startswith(b"%PDF-")
     assert sample.startswith("\r\n")
     assert "Issued by ComIreland Ltd" not in sample
     assert "Order WEB - Ref : WEB235520.0182" in sample

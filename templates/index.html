@@ -49,7 +49,10 @@
 <section id="results" class="results card hidden" aria-live="polite">
   <div class="results-head">
     <div><p class="eyebrow">READY TO DOWNLOAD</p><h2 id="results-title">Your CSV files</h2><p id="results-summary"></p></div>
-    <button id="download-all" class="download-all" type="button">Download all CSVs <span>↓</span></button>
+    <div class="download-all-group">
+      <button id="download-all" class="download-all" type="button">Download all CSVs <span>↓</span></button>
+      <button id="download-all-pdfs" class="download-all secondary-download" type="button">Download all PDFs <span>↓</span></button>
+    </div>
   </div>
   <div id="file-list" class="file-list"></div>
 </section>

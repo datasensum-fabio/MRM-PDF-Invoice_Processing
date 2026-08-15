@@ -9,9 +9,16 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from xml.sax.saxutils import escape
 
 from flask import Flask, jsonify, render_template, request
 from pypdf import PdfReader
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_RIGHT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
@@ -68,7 +75,7 @@ def parse_item(line: str) -> Item | None:
         return None
     ref_index = mode_index - 3
     size = ""
-    if (ref_index >= 1 and NUMBER.match(tokens[ref_index])
+    if (ref_index >= 1 and "," in tokens[ref_index] and NUMBER.match(tokens[ref_index])
             and any(char.isdigit() for char in tokens[ref_index - 1])):
         size = tokens[ref_index]
         ref_index -= 1
@@ -156,6 +163,72 @@ def csv_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
     return "\ufeff".encode("utf-8") + output.getvalue().encode("utf-8")
 
 
+def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal) -> bytes:
+    output = io.BytesIO()
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("InvoiceBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=8, leading=10)
+    small = ParagraphStyle("InvoiceSmall", parent=body, fontSize=7, leading=9)
+    header = ParagraphStyle("InvoiceHeader", parent=small, textColor=colors.white, fontName="Helvetica-Bold")
+    right = ParagraphStyle("InvoiceRight", parent=body, alignment=TA_RIGHT)
+
+    def paragraph(value, style=body):
+        text = escape(str(value)).replace("\n", "<br/>").replace("€", "&euro;")
+        return Paragraph(text or "&#160;", style)
+
+    def footer(canvas, document):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#657386"))
+        canvas.drawString(15 * mm, 9 * mm, f"Invoice #{invoice} · {group.label}")
+        canvas.drawRightString(282 * mm, 9 * mm, f"Page {document.page}")
+        canvas.restoreState()
+
+    document = SimpleDocTemplate(
+        output, pagesize=landscape(A4), leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=14 * mm, bottomMargin=15 * mm, title=f"Invoice {invoice} - {group.reference}",
+    )
+    story = [
+        Paragraph(f"Invoice #{escape(invoice)}", styles["Title"]),
+        Spacer(1, 3 * mm),
+        paragraph(f"Date {date.today():%d/%m/%Y}    ·    Gold Fix € {gold_fix:.2f}"),
+        Spacer(1, 2 * mm),
+        Paragraph(escape(group.label), styles["Heading2"]),
+        Spacer(1, 4 * mm),
+    ]
+    table_rows = [[paragraph(value, header) for value in
+                   ["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"]]]
+    order_total = Decimal("0")
+    for item in group.items:
+        unit = item_price(item, gold_fix, markup)
+        total = (unit * item.qty).quantize(MONEY)
+        order_total += total
+        table_rows.append([
+            paragraph(item.description), paragraph(item.reference), paragraph(item.size, right),
+            paragraph(item.qty, right), paragraph(f"{item.metal:.2f}", right), paragraph(item.mode),
+            paragraph(euro(unit), right), paragraph(euro(total), right),
+        ])
+    table_rows.append([paragraph("Order total", right), "", "", "", "", "", "",
+                       paragraph(euro(order_total), right)])
+    table = Table(table_rows, colWidths=[91 * mm, 26 * mm, 14 * mm, 14 * mm, 18 * mm, 15 * mm, 25 * mm, 27 * mm],
+                  repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#12233B")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -2), 0.35, colors.HexColor("#DCE3EB")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 1), (-1, -2), colors.white),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#EDF4FF")),
+        ("SPAN", (0, -1), (6, -1)),
+        ("BOX", (0, -1), (-1, -1), 0.5, colors.HexColor("#9FB0C4")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(table)
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
+    return output.getvalue()
+
+
 def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "order"
 
@@ -182,10 +255,13 @@ def process_invoice():
         files = []
         for order_ref, group in groups.items():
             content = csv_for_order(invoice, group, gold_fix, markup)
+            pdf_content = pdf_for_order(invoice, group, gold_fix, markup)
             files.append({
                 "order_ref": group.label,
                 "filename": f"invoice_{invoice}_{safe_name(order_ref)}.csv",
                 "content_base64": base64.b64encode(content).decode("ascii"),
+                "pdf_filename": f"invoice_{invoice}_{safe_name(order_ref)}.pdf",
+                "pdf_base64": base64.b64encode(pdf_content).decode("ascii"),
                 "item_count": len(group.items),
                 "preview_rows": csv_rows_for_order(invoice, group, gold_fix, markup),
             })

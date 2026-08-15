@@ -9,6 +9,7 @@ const resultsTitle = document.querySelector('#results-title');
 const resultsSummary = document.querySelector('#results-summary');
 const fileList = document.querySelector('#file-list');
 const downloadAll = document.querySelector('#download-all');
+const downloadAllPdfs = document.querySelector('#download-all-pdfs');
 const goldFixInput = document.querySelector('#gold-fix');
 const lastGoldFix = document.querySelector('#last-gold-fix');
 const LAST_GOLD_FIX_KEY = 'comireland-last-gold-fix';
@@ -26,7 +27,10 @@ try {
 }
 
 function clearGeneratedFiles() {
-  generatedFiles.forEach(file => URL.revokeObjectURL(file.url));
+  generatedFiles.forEach(file => {
+    URL.revokeObjectURL(file.url);
+    URL.revokeObjectURL(file.pdfUrl);
+  });
   generatedFiles = [];
   fileList.replaceChildren();
   results.classList.add('hidden');
@@ -38,6 +42,12 @@ function csvBlob(base64) {
   return new Blob([bytes], { type: 'text/csv;charset=utf-8' });
 }
 
+function decodedBlob(base64, type) {
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  return new Blob([bytes], { type });
+}
+
 function triggerDownload(file) {
   const link = Object.assign(document.createElement('a'), { href: file.url, download: file.filename });
   document.body.append(link);
@@ -47,7 +57,11 @@ function triggerDownload(file) {
 
 function showResults(data) {
   clearGeneratedFiles();
-  generatedFiles = data.files.map(file => ({ ...file, url: URL.createObjectURL(csvBlob(file.content_base64)) }));
+  generatedFiles = data.files.map(file => ({
+    ...file,
+    url: URL.createObjectURL(csvBlob(file.content_base64)),
+    pdfUrl: URL.createObjectURL(decodedBlob(file.pdf_base64, 'application/pdf')),
+  }));
   resultsTitle.textContent = `Invoice #${data.invoice}`;
   resultsSummary.textContent = `${generatedFiles.length} individual CSV ${generatedFiles.length === 1 ? 'file' : 'files'} created.`;
   generatedFiles.forEach(file => {
@@ -57,11 +71,18 @@ function showResults(data) {
     details.innerHTML = '<span class="csv-icon">CSV</span><div><strong></strong><small></small></div>';
     details.querySelector('strong').textContent = file.order_ref;
     details.querySelector('small').textContent = `${file.item_count} ${file.item_count === 1 ? 'product' : 'products'} · ${file.filename}`;
+    const actions = document.createElement('div');
+    actions.className = 'file-actions';
     const link = document.createElement('a');
     link.href = file.url;
     link.download = file.filename;
     link.textContent = 'Download CSV ↓';
-    row.append(details, link);
+    const pdfLink = document.createElement('a');
+    pdfLink.href = file.pdfUrl;
+    pdfLink.download = file.pdf_filename;
+    pdfLink.textContent = 'Download PDF ↓';
+    actions.append(link, pdfLink);
+    row.append(details, actions);
 
     const preview = document.createElement('details');
     preview.className = 'csv-preview';
@@ -95,6 +116,10 @@ input.addEventListener('change', showFile);
 ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, () => dropzone.classList.add('dragging')));
 ['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, () => dropzone.classList.remove('dragging')));
 downloadAll.addEventListener('click', () => generatedFiles.forEach(triggerDownload));
+downloadAllPdfs.addEventListener('click', () => generatedFiles.forEach(file => triggerDownload({
+  url: file.pdfUrl,
+  filename: file.pdf_filename,
+})));
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
