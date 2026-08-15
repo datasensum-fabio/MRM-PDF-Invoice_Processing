@@ -3,7 +3,7 @@
 <section class="hero">
   <p class="eyebrow">INVOICE PROCESSING</p>
   <h1>One invoice in.<br><em>Clean orders out.</em></h1>
-  <p class="lead">Upload a Robbez PDF invoice and receive a ZIP containing one ready-to-use CSV for every Order Ref.</p>
+  <p class="lead">Upload a Robbez PDF invoice and receive one ready-to-use CSV for every Order Ref.</p>
 </section>
 
 <section class="workspace">
@@ -39,6 +39,14 @@
       <li><span>3</span><div><strong>ComIreland output</strong><small>Today’s date and ComIreland as issuer are included.</small></div></li>
     </ol>
   </aside>
+</section>
+
+<section id="results" class="results card hidden" aria-live="polite">
+  <div class="results-head">
+    <div><p class="eyebrow">READY TO DOWNLOAD</p><h2 id="results-title">Your CSV files</h2><p id="results-summary"></p></div>
+    <button id="download-all" class="download-all" type="button">Download all CSVs <span>↓</span></button>
+  </div>
+  <div id="file-list" class="file-list"></div>
 </section>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}

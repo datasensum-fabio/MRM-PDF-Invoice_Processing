@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import os
 import re
-import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request
 from pypdf import PdfReader
 
 app = Flask(__name__)
@@ -160,14 +160,16 @@ def process_invoice():
         return jsonify(error="Enter a valid positive gold fix and a non-negative markup."), 400
     try:
         invoice, groups = extract_invoice(uploaded.stream)
-        archive = io.BytesIO()
-        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
-            for order_ref, items in groups.items():
-                name = f"invoice_{invoice}_{safe_name(order_ref)}.csv"
-                bundle.writestr(name, csv_for_order(invoice, order_ref, items, gold_fix, markup))
-        archive.seek(0)
-        return send_file(archive, mimetype="application/zip", as_attachment=True,
-                         download_name=f"invoice_{invoice}_orders.zip")
+        files = []
+        for order_ref, items in groups.items():
+            content = csv_for_order(invoice, order_ref, items, gold_fix, markup)
+            files.append({
+                "order_ref": order_ref,
+                "filename": f"invoice_{invoice}_{safe_name(order_ref)}.csv",
+                "content_base64": base64.b64encode(content).decode("ascii"),
+                "item_count": len(items),
+            })
+        return jsonify(invoice=invoice, files=files)
     except (ValueError, InvalidOperation) as exc:
         return jsonify(error=str(exc)), 422
     except Exception:

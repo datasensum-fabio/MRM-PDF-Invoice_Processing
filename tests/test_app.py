@@ -1,5 +1,5 @@
 import io
-import zipfile
+import base64
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -56,10 +56,12 @@ def test_process_returns_one_csv_per_order_ref():
             "markup": "35",
         })
     assert response.status_code == 200
-    with zipfile.ZipFile(io.BytesIO(response.data)) as bundle:
-        names = bundle.namelist()
-        assert len(names) == 2
-        sample = bundle.read("invoice_4690899_WEB235520.0182.csv").decode("utf-8-sig")
+    assert response.json["invoice"] == "4690899"
+    assert len(response.json["files"]) == 2
+    selected = next(file for file in response.json["files"] if file["order_ref"] == "WEB235520.0182")
+    assert selected["filename"] == "invoice_4690899_WEB235520.0182.csv"
+    assert selected["item_count"] == 2
+    sample = base64.b64decode(selected["content_base64"]).decode("utf-8-sig")
     assert "Issued by ComIreland Ltd" in sample
     assert "Hoops earrings pair plain 9K YG" in sample
 

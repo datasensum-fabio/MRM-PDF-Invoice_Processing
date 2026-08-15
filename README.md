@@ -1,6 +1,6 @@
 # ComIreland PDF Invoice Processing
 
-A focused web app that converts Robbez PDF invoices into a ZIP of CSV invoices. Each CSV contains exactly one Order Ref and identifies ComIreland Ltd as the issuer.
+A focused web app that converts Robbez PDF invoices into individually downloadable CSV invoices. Each CSV contains exactly one Order Ref and identifies ComIreland Ltd as the issuer. The results screen supports downloading one CSV at a time or downloading all CSVs together as individual files.
 
 ## Pricing rules
 
