@@ -1,91 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="hero compact">
-  <div>
-    <p class="eyebrow">LOCAL-FIRST PRODUCT MEDIA</p>
-    <h1>Match locally.<br>Upload directly.</h1>
-    <p class="lead">Your ZIP and images stay on this computer. Only product metadata and upload confirmations pass through this app.</p>
-  </div>
-  {% if protected %}<form method="post" action="{{ url_for('logout') }}"><button class="secondary" type="submit">Sign out</button></form>{% endif %}
+<section class="hero">
+  <p class="eyebrow">INVOICE PROCESSING</p>
+  <h1>One invoice in.<br><em>Clean orders out.</em></h1>
+  <p class="lead">Upload a Robbez PDF invoice and receive a ZIP containing one ready-to-use CSV for every Order Ref.</p>
 </section>
 
-{% if not configured %}
-<div class="notice error">Shopify is not configured. Add the required environment variables before continuing.</div>
-{% endif %}
-{% if demo_mode %}
-<div class="notice demo">Demo mode is active. Select a Shopify product CSV below; matching uses its real product handles locally. Uploading to Shopify remains disabled.</div>
-{% endif %}
+<section class="workspace">
+  <form id="processor" class="card">
+    <div class="card-head"><span>01</span><div><h2>Source invoice</h2><p>Your PDF is processed for this download only.</p></div></div>
+    <label id="dropzone" class="dropzone">
+      <input id="invoice" name="invoice" type="file" accept="application/pdf,.pdf" required>
+      <span class="file-icon">PDF</span>
+      <strong id="file-name">Drop an invoice here</strong>
+      <small>or click to choose a file · maximum 25 MB</small>
+    </label>
 
-<section id="start-card" class="card">
-  <div class="section-title"><span class="step">01</span><div><h2>Select the Shopify product CSV</h2><p>Export products from Shopify. The CSV stays in this browser and supplies handles, titles, SKUs and barcodes.</p></div></div>
-  <label class="file-row"><span>Shopify product CSV</span><input id="catalog" type="file" accept=".csv,text/csv" {% if demo_mode %}required{% endif %}></label>
-  <div class="section-title archive-title"><span class="step">02</span><div><h2>Select one or more ZIP archives</h2><p>ZIP64 archives are supported. Large files are read incrementally and are never sent to Vercel.</p></div></div>
-  <label class="dropzone" id="dropzone">
-    <input id="archive" type="file" accept=".zip,application/zip" multiple {% if not configured %}disabled{% endif %}>
-    <strong>Drop ZIP files here or click to browse</strong>
-    <span>Up to 10 GB per archive · desktop Chrome or Edge recommended above 2 GB</span>
-  </label>
-  <div id="start-actions" class="inline-actions hidden">
-    <div id="file-summary"></div>
-    <button id="analyse" type="button">Analyse locally</button>
-  </div>
-</section>
-
-<section id="working" class="card hidden" aria-live="polite">
-  <div class="section-title"><span class="step">02</span><div><h2 id="working-title">Reading archive</h2><p id="working-detail">Preparing the local job…</p></div></div>
-  <progress id="progress" max="100" value="0"></progress>
-</section>
-
-<section id="review" class="hidden">
-  <div class="review-head">
-    <div><p class="eyebrow">03 · REVIEW</p><h2>Confirm matches</h2></div>
-    <div id="summary" class="summary-grid"></div>
-  </div>
-  <div class="filters">
-    <button type="button" class="filter active" data-filter="all">All</button>
-    <button type="button" class="filter" data-filter="auto_approved">Auto-approved</button>
-    <button type="button" class="filter" data-filter="needs_review">Needs review</button>
-    <button type="button" class="filter" data-filter="no_match">No match</button>
-    <button type="button" class="filter" data-filter="duplicate">Duplicates</button>
-    <button type="button" class="filter" data-filter="already_on_shopify">Already on Shopify</button>
-    <button type="button" class="filter" data-filter="failed">Failed</button>
-  </div>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Picture name</th><th>Image comparison</th><th>Shopify Match</th><th>Product choice</th><th>Decision</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table></div>
-  <div class="actionbar">
-    <div><strong id="upload-count">0 images selected</strong><small>Images are processed and uploaded one at a time.</small></div>
-    <div class="inline-actions"><button id="reset" class="secondary" type="button">Start over</button><button id="upload" type="button" {% if demo_mode %}disabled title="Uploads are disabled in demo mode"{% endif %}>Process and upload</button></div>
-  </div>
-  <div class="manual-export">
-    <div><strong>Shopify CSV import</strong><small>Create a Shopify import file using temporary hosted images, or provide your own public image URLs.</small></div>
-    <div class="export-mode-options" role="radiogroup" aria-label="Public image hosting method">
-      <label class="export-mode-option {% if temporary_hosting %}active{% endif %}"><input type="radio" name="export-mode" value="automatic" {% if temporary_hosting %}checked{% else %}disabled{% endif %}><span><strong>Host automatically</strong><small>Upload only the selected, processed images to Vercel Blob and create the Shopify CSV automatically.</small></span></label>
-      <label class="export-mode-option {% if not temporary_hosting %}active{% endif %}"><input type="radio" name="export-mode" value="manual" {% if not temporary_hosting %}checked{% endif %}><span><strong>Use a public image URL CSV</strong><small>Keep the existing workflow with image URLs supplied in a separate CSV.</small></span></label>
+    <div class="card-head settings"><span>02</span><div><h2>Pricing</h2><p>Review the values used for this invoice.</p></div></div>
+    <div class="fields">
+      <label><span>Gold fix price (€)</span><input name="gold_fix" type="number" min="0.01" step="0.01" placeholder="65.20" required></label>
+      <label><span>Standard markup (%)</span><input name="markup" type="number" min="0" step="0.01" value="35" required></label>
     </div>
-    <div id="automatic-export" class="export-mode-panel {% if not temporary_hosting %}hidden{% endif %}">
-      <div class="inline-actions"><small>Temporary images become eligible for deletion after 24 hours and are removed by the next daily cleanup.</small><button id="host-and-download-shopify-csv" type="button" disabled>Host images &amp; download CSV</button></div>
+    <div class="formula-note">
+      <strong>Gold pricing</strong>
+      <span>9CT: Gold Fix × Metal ÷ Qty + Labour × 1.27</span>
+      <span>18CT: Gold Fix × Metal × 2 ÷ Qty + Labour × 1.27</span>
     </div>
-    <div id="manual-export" class="export-mode-panel {% if temporary_hosting %}hidden{% endif %}">
-      <label class="file-row compact-file"><span>Public image URL CSV</span><input id="public-image-csv" type="file" accept=".csv,text/csv"></label>
-      <div class="inline-actions"><small id="public-image-summary">No public image URL CSV selected</small><button id="download-shopify-csv" class="secondary" type="button" disabled>Download Shopify import CSV</button></div>
-    </div>
-    {% if not temporary_hosting %}<small class="warning">Automatic hosting is not configured yet. Connect a public Vercel Blob store and redeploy to enable it.</small>{% endif %}
-    <small>The generated file preserves every exported row for affected products. In Shopify Import, select <strong>Overwrite products with matching handles</strong>. Export a fresh backup first.</small>
-  </div>
+    <button id="submit" type="submit">Process invoice <span>→</span></button>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+  </form>
+
+  <aside>
+    <p class="eyebrow">WHAT YOU GET</p>
+    <h2>Built for a quick handoff.</h2>
+    <ol>
+      <li><span>1</span><div><strong>Automatic split</strong><small>Every Order Ref becomes a separate CSV.</small></div></li>
+      <li><span>2</span><div><strong>Correct pricing</strong><small>Gold formulas and standard markup are applied line by line.</small></div></li>
+      <li><span>3</span><div><strong>ComIreland output</strong><small>Today’s date and ComIreland as issuer are included.</small></div></li>
+    </ol>
+  </aside>
 </section>
-
-<template id="row-template">
-  <tr>
-    <td><strong class="filename"></strong><small class="archive-name"></small><small class="row-error"></small></td>
-    <td class="comparison-cell"><div class="image-comparison"><figure class="zip-preview"><img class="local-preview" loading="lazy" alt="ZIP image preview"><small class="local-preview-missing">Preview unavailable</small><figcaption>ZIP image</figcaption></figure><div class="product-images"><div class="shopify-product-gallery"></div><small class="product-images-message">Product with no pictures</small><span>Shopify product pictures</span></div></div></td>
-    <td class="shopify-match"><strong class="product-handle-metal"></strong><small class="matching-variants"></small></td>
-    <td class="product-choice"><select class="product-select"><option value="">Skip / no product</option></select><div class="confidence"><span class="score"></span><small class="matched-on"></small></div></td>
-    <td><span class="match-status"></span><div class="upload-decision hidden" role="group" aria-label="Upload decision"><button type="button" data-decision="add">Add</button><button type="button" data-decision="replace">Replace</button><button type="button" data-decision="do_not_upload">Do not upload</button></div><small class="upload-status"></small></td>
-  </tr>
-</template>
-
-<script>window.APP_CONFIG = {{ {"demoMode": demo_mode, "temporaryHosting": temporary_hosting, "temporaryUploadMaxBytes": temporary_upload_max_bytes}|tojson }};</script>
-<script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}

@@ -1,287 +1,183 @@
 from __future__ import annotations
 
-import hmac
+import csv
+import io
 import os
 import re
-import time
-import uuid
-from functools import wraps
-from typing import Any, Callable
+import zipfile
+from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
-
-from shopify import ShopifyClient, ShopifyError
-
-load_dotenv()
+from flask import Flask, jsonify, render_template, request, send_file
+from pypdf import PdfReader
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "development-only-change-me")
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv("VERCEL") == "1" or os.getenv("COOKIE_SECURE") == "1",
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+
+MONEY = Decimal("0.01")
+NUMBER = re.compile(r"^-?\d+(?:[.,]\d+)?$")
+ORDER = re.compile(r"^Order\s+(.+?)\s+-\s+Ref\s*:\s*(.+?)\s*$", re.I)
+INVOICE = re.compile(r"Invoice\s+#(\d+)", re.I)
+SKIP_PREFIXES = (
+    "Description Your ref.", "Delivery address", "TOTAL VAT", "Subtotal", "Shipping costs",
+    "Invoice ", "Total quantity", "Current balance", "Your current", "Gold still", "Please ",
+    "Bank coordinates", "Any delay", "Countermark", "Produits ", "RETENTION OF TITLE", "SAS with",
+    "316 769", "Code APE", "Rue du", "Tél ", "VAT:", "Folio ", "Date ", "Customer ",
+    "Exonération", "Daily gold", "Comireland", "Shamrock House", "Dundrum", "D14NW93", "Irlande",
+    "Siren", "payment of", "remains vested", "Retrouvez", "(Our terms", "(1)", "(2)",
 )
-APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
-DEMO_MODE = os.getenv("DEMO_MODE") == "1" or not os.getenv("SHOPIFY_STORE", "").strip()
-CRON_SECRET = os.getenv("CRON_SECRET", "").strip()
-TEMP_BLOB_PREFIX = "shopify-imports/"
-TEMP_BLOB_TTL_SECONDS = 24 * 60 * 60
-TEMP_IMAGE_MAX_BYTES = 4 * 1024 * 1024
-if os.getenv("VERCEL") and not DEMO_MODE and (not APP_PASSWORD or app.secret_key == "development-only-change-me"):
-    raise RuntimeError("Vercel deployments require APP_PASSWORD and a secure SECRET_KEY.")
 
 
-def api_error(message: str, status: int = 400):
-    return jsonify({"error": message}), status
+@dataclass
+class Item:
+    description: str
+    reference: str
+    size: str
+    qty: int
+    metal: Decimal
+    mode: str
+    labour: Decimal
+    supplier_unit: Decimal
 
 
-def authenticated() -> bool:
-    return not APP_PASSWORD or session.get("authenticated") is True
+def decimal_value(value: str) -> Decimal:
+    return Decimal(value.replace(" ", "").replace(",", "."))
 
 
-def temporary_hosting_configured() -> bool:
-    return bool(os.getenv("BLOB_READ_WRITE_TOKEN", "").strip())
+def parse_item(line: str) -> Item | None:
+    tokens = line.split()
+    mode_index = next((i for i in range(len(tokens) - 1, -1, -1) if tokens[i].lower() in {"a", "t", "c"}), -1)
+    if mode_index < 3 or len(tokens) - mode_index not in {3, 4}:
+        return None
+    after = tokens[mode_index + 1:]
+    if not all(NUMBER.match(value) for value in after):
+        return None
+    try:
+        metal = decimal_value(tokens[mode_index - 1])
+        qty = int(tokens[mode_index - 2])
+    except (InvalidOperation, ValueError):
+        return None
+    ref_index = mode_index - 3
+    size = ""
+    if (ref_index >= 1 and NUMBER.match(tokens[ref_index])
+            and any(char.isdigit() for char in tokens[ref_index - 1])):
+        size = tokens[ref_index]
+        ref_index -= 1
+    if ref_index < 0:
+        return None
+    reference = tokens[ref_index]
+    if not any(char.isdigit() for char in reference):
+        return None
+    description = " ".join(tokens[:ref_index]).strip()
+    labour = decimal_value(after[0])
+    supplier_unit = decimal_value(after[-2] if len(after) == 3 else after[0])
+    return Item(description, reference, size, qty, metal, tokens[mode_index].lower(), labour, supplier_unit)
 
 
-def blob_client():
-    from vercel.blob import BlobClient
+def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, list[Item]]]:
+    reader = PdfReader(pdf_stream)
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    invoice_match = INVOICE.search(text)
+    if not invoice_match:
+        raise ValueError("The PDF does not contain a recognizable invoice number.")
+    groups: OrderedDict[str, list[Item]] = OrderedDict()
+    current_ref: str | None = None
+    for raw_line in text.splitlines():
+        line = " ".join(raw_line.split()).strip()
+        order_match = ORDER.match(line)
+        if order_match:
+            current_ref = order_match.group(2).strip().split()[0]
+            groups.setdefault(current_ref, [])
+            continue
+        if not current_ref or not line or line.startswith(SKIP_PREFIXES):
+            continue
+        item = parse_item(line)
+        if item:
+            groups[current_ref].append(item)
+    groups = OrderedDict((ref, items) for ref, items in groups.items() if items)
+    if not groups:
+        raise ValueError("No product rows grouped by Order Ref were found in this PDF.")
+    return invoice_match.group(1), groups
 
-    return BlobClient()
+
+def item_price(item: Item, gold_fix: Decimal, markup: Decimal) -> Decimal:
+    description = item.description.upper()
+    if "18CT" in description or "18K" in description:
+        value = gold_fix * item.metal * Decimal("2") / item.qty + item.labour * Decimal("1.27")
+    elif "9CT" in description or "9K" in description:
+        value = gold_fix * item.metal / item.qty + item.labour * Decimal("1.27")
+    else:
+        value = item.supplier_unit * (Decimal("1") + markup / Decimal("100"))
+    return value.quantize(MONEY, rounding=ROUND_HALF_UP)
 
 
-def blob_list_objects(**options: Any):
-    from vercel.blob import list_objects
-
-    return list_objects(**options)
+def euro(value: Decimal) -> str:
+    return f"€ {value:.2f}"
 
 
-def blob_delete(urls: list[str]):
-    from vercel.blob import delete
+def csv_for_order(invoice: str, order_ref: str, items: list[Item], gold_fix: Decimal, markup: Decimal) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([f"Date {date.today():%d/%m/%Y}", "Gold Fix", euro(gold_fix), "", "", "", "", "", ""])
+    writer.writerow([f"Invoice #{invoice}", "", "", "", "", "", "", "", ""])
+    writer.writerow(["Issued by ComIreland Ltd", "", "", "", "", "", "", "", ""])
+    writer.writerow([f"Order Ref : {order_ref}", "", "", "", "", "", "", "", ""])
+    writer.writerow([])
+    writer.writerow(["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"])
+    priced = [(item, item_price(item, gold_fix, markup)) for item in items]
+    grand_total = sum((unit * item.qty for item, unit in priced), Decimal("0")).quantize(MONEY)
+    writer.writerow(["", "", "", "", "", "", "", euro(grand_total)])
+    for item, unit in priced:
+        writer.writerow([
+            item.description, item.reference, item.size, item.qty,
+            f"{item.metal:.2f}".replace(".", ","), item.mode, euro(unit), euro(unit * item.qty),
+        ])
+    return "\ufeff".encode("utf-8") + output.getvalue().encode("utf-8")
 
-    return delete(urls)
 
-
-def blob_value(value: Any, name: str, default: Any = None) -> Any:
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
-
-
-def require_auth(view: Callable[..., Any]):
-    @wraps(view)
-    def wrapped(*args: Any, **kwargs: Any):
-        if not authenticated():
-            return api_error("Authentication required.", 401)
-        return view(*args, **kwargs)
-
-    return wrapped
+def safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "order"
 
 
 @app.get("/")
 def index():
-    if not authenticated():
-        return render_template("login.html")
-    return render_template(
-        "index.html",
-        configured=ShopifyClient().configured or DEMO_MODE,
-        protected=bool(APP_PASSWORD),
-        demo_mode=DEMO_MODE,
-        temporary_hosting=temporary_hosting_configured(),
-        temporary_upload_max_bytes=TEMP_IMAGE_MAX_BYTES,
-    )
+    return render_template("index.html")
 
 
-@app.post("/login")
-def login():
-    supplied = request.form.get("password", "")
-    if APP_PASSWORD and hmac.compare_digest(supplied, APP_PASSWORD):
-        session.clear()
-        session["authenticated"] = True
-        return redirect(url_for("index"))
-    return render_template("login.html", error="Incorrect password."), 401
-
-
-@app.post("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("index"))
-
-
-@app.get("/api/products")
-@require_auth
-def products():
-    if DEMO_MODE:
-        return api_error("Demo mode uses a Shopify product CSV selected in the browser.", 503)
-    client = ShopifyClient()
-    cursor = request.args.get("cursor") or None
+@app.post("/api/process")
+def process_invoice():
+    uploaded = request.files.get("invoice")
+    if not uploaded or not uploaded.filename.lower().endswith(".pdf"):
+        return jsonify(error="Choose a PDF invoice."), 400
     try:
-        page = client.get_products_page(cursor)
-    except ShopifyError as exc:
-        return api_error(str(exc), 502)
-    return jsonify(page)
-
-
-@app.get("/api/product-media")
-@require_auth
-def product_media():
-    if DEMO_MODE:
-        return api_error("Demo mode uses image URLs from the selected Shopify CSV.", 503)
-    product_id = request.args.get("product_id", "")
-    if not product_id.startswith("gid://shopify/Product/"):
-        return api_error("Invalid product ID.")
+        gold_fix = decimal_value(request.form.get("gold_fix", ""))
+        markup = decimal_value(request.form.get("markup", "35"))
+        if gold_fix <= 0 or markup < 0:
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return jsonify(error="Enter a valid positive gold fix and a non-negative markup."), 400
     try:
-        media = ShopifyClient().get_product_media(product_id)
-    except ShopifyError as exc:
-        return api_error(str(exc), 502)
-    return jsonify({"media": media})
-
-
-@app.post("/api/staged-uploads")
-@require_auth
-def staged_uploads():
-    if DEMO_MODE:
-        return api_error("Uploads are disabled in demo mode. Add Shopify credentials and set DEMO_MODE=0.", 503)
-    payload = request.get_json(silent=True) or {}
-    files = payload.get("files")
-    if not isinstance(files, list) or not 1 <= len(files) <= 25:
-        return api_error("Provide between 1 and 25 files.")
-    cleaned = []
-    for item in files:
-        if not isinstance(item, dict):
-            return api_error("Invalid file entry.")
-        filename = str(item.get("filename", ""))[:180]
-        size = item.get("size")
-        if not filename or not isinstance(size, int) or size <= 0 or size >= 20 * 1024 * 1024:
-            return api_error("Each file requires a valid filename and must be smaller than 20 MB.")
-        cleaned.append({"filename": filename, "mime_type": "image/jpeg", "size": size})
-    try:
-        targets = ShopifyClient().create_staged_uploads(cleaned)
-    except ShopifyError as exc:
-        return api_error(str(exc), 502)
-    return jsonify({"targets": targets})
-
-
-@app.post("/api/attach-image")
-@require_auth
-def attach_image():
-    if DEMO_MODE:
-        return api_error("Uploads are disabled in demo mode.", 503)
-    payload = request.get_json(silent=True) or {}
-    product_id = str(payload.get("product_id", ""))
-    variant_ids = payload.get("variant_ids") or []
-    resource_url = str(payload.get("resource_url", ""))
-    alt = str(payload.get("alt", ""))[:512]
-    mode = str(payload.get("mode", "add"))
-    if not product_id.startswith("gid://shopify/Product/"):
-        return api_error("Invalid product ID.")
-    if not isinstance(variant_ids, list) or len(variant_ids) > 2048 or any(
-        not isinstance(variant_id, str) or not variant_id.startswith("gid://shopify/ProductVariant/")
-        for variant_id in variant_ids
-    ):
-        return api_error("Invalid product variant selection.")
-    if not resource_url.startswith("https://"):
-        return api_error("Invalid staged resource URL.")
-    if mode not in {"add", "replace"}:
-        return api_error("Invalid upload decision.")
-    try:
-        client = ShopifyClient()
-        if mode == "replace":
-            client.replace_product_images(product_id, resource_url, alt, variant_ids)
-        else:
-            client.attach_product_image(product_id, resource_url, alt, variant_ids)
-    except ShopifyError as exc:
-        return api_error(str(exc), 502)
-    return jsonify({"ok": True})
-
-
-@app.post("/api/temporary-image")
-@require_auth
-def temporary_image():
-    if not temporary_hosting_configured():
-        return api_error("Temporary image hosting is not configured. Connect a public Vercel Blob store first.", 503)
-    content_length = request.content_length or 0
-    if content_length > TEMP_IMAGE_MAX_BYTES:
-        return api_error("The processed image must be no larger than 4 MB.", 413)
-    if request.mimetype != "image/jpeg":
-        return api_error("Temporary Shopify images must be JPEG files.")
-    image = request.stream.read(TEMP_IMAGE_MAX_BYTES + 1)
-    if not image:
-        return api_error("The image is empty.")
-    if len(image) > TEMP_IMAGE_MAX_BYTES:
-        return api_error("The processed image must be no larger than 4 MB.", 413)
-
-    supplied_name = request.args.get("filename", "image.jpg")
-    stem = re.sub(r"[^A-Za-z0-9_-]+", "-", supplied_name.rsplit(".", 1)[0]).strip("-")[:120] or "image"
-    expires_at = int(time.time()) + TEMP_BLOB_TTL_SECONDS
-    pathname = f"{TEMP_BLOB_PREFIX}{expires_at}/{uuid.uuid4().hex}-{stem}.jpg"
-    try:
-        blob = blob_client().put(
-            pathname,
-            image,
-            access="public",
-            content_type="image/jpeg",
-            cache_control_max_age=TEMP_BLOB_TTL_SECONDS,
-        )
+        invoice, groups = extract_invoice(uploaded.stream)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for order_ref, items in groups.items():
+                name = f"invoice_{invoice}_{safe_name(order_ref)}.csv"
+                bundle.writestr(name, csv_for_order(invoice, order_ref, items, gold_fix, markup))
+        archive.seek(0)
+        return send_file(archive, mimetype="application/zip", as_attachment=True,
+                         download_name=f"invoice_{invoice}_orders.zip")
+    except (ValueError, InvalidOperation) as exc:
+        return jsonify(error=str(exc)), 422
     except Exception:
-        app.logger.exception("Temporary image upload failed")
-        return api_error("Temporary image hosting failed. Check the Vercel Blob configuration.", 502)
-    url = blob_value(blob, "url", "")
-    if not isinstance(url, str) or not url.startswith("https://"):
-        return api_error("Temporary image hosting did not return a public URL.", 502)
-    return jsonify({"url": url, "expires_at": expires_at})
-
-
-@app.get("/api/cleanup-temporary-images")
-def cleanup_temporary_images():
-    supplied = request.headers.get("Authorization", "")
-    expected = f"Bearer {CRON_SECRET}" if CRON_SECRET else ""
-    if not expected or not hmac.compare_digest(supplied, expected):
-        return api_error("Unauthorized.", 401)
-    if not temporary_hosting_configured():
-        return api_error("Temporary image hosting is not configured.", 503)
-
-    now = int(time.time())
-    cursor = None
-    scanned = 0
-    deleted = 0
-    expired_urls = []
-    for _ in range(20):
-        page = blob_list_objects(prefix=TEMP_BLOB_PREFIX, cursor=cursor, limit=1000)
-        blobs = blob_value(page, "blobs", []) or []
-        scanned += len(blobs)
-        for blob in blobs:
-            pathname = str(blob_value(blob, "pathname", ""))
-            relative = pathname.removeprefix(TEMP_BLOB_PREFIX)
-            expiry_text = relative.split("/", 1)[0]
-            if expiry_text.isdigit() and int(expiry_text) <= now:
-                url = blob_value(blob, "url", "")
-                if url:
-                    expired_urls.append(url)
-        if len(expired_urls) >= 100:
-            deleted += len(expired_urls)
-            blob_delete(expired_urls)
-            expired_urls.clear()
-        if not blob_value(page, "has_more", False):
-            cursor = None
-            break
-        cursor = blob_value(page, "cursor")
-        if not cursor:
-            break
-    if expired_urls:
-        deleted += len(expired_urls)
-        blob_delete(expired_urls)
-    return jsonify({"ok": True, "scanned": scanned, "deleted": deleted, "has_more": bool(cursor)})
+        app.logger.exception("Invoice processing failed")
+        return jsonify(error="The invoice could not be processed. Confirm it uses the supported company format."), 422
 
 
 @app.get("/api/health")
 def health():
-    return jsonify({
-        "ok": True,
-        "shopify_configured": ShopifyClient().configured,
-        "demo_mode": DEMO_MODE,
-        "temporary_hosting_configured": temporary_hosting_configured(),
-    })
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":

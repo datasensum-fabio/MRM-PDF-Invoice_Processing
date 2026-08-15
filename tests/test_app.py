@@ -1,111 +1,72 @@
-import os
+import io
+import zipfile
+from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import app as application
 
 
-def client():
-    application.app.config.update(TESTING=True, SECRET_KEY="test")
-    return application.app.test_client()
+PDF_TEXT = """Invoice #4690899
+Order WEB - Ref : WEB235520.0182
+Hoops earrings pair plain 9K YG 650068.3 1 1,20 t 8,78 9,36 9,36
+Earrings pair w. cult.FWpearl gold plated Brass 135047 1 1,95 a 41,98 41,98 41,98
+Order WEB - Ref : WEB235522.0205 note for warehouse
+Set of 5 925 silver extension chain RALLAG.5 1 2,00 a 15,30 15,30 15,30
+"""
 
 
-def test_health_does_not_require_login():
-    response = client().get("/api/health")
+def parsed_fixture():
+    reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: PDF_TEXT)])
+    with patch.object(application, "PdfReader", return_value=reader):
+        return application.extract_invoice(io.BytesIO(b"pdf"))
+
+
+def test_health():
+    application.app.config["TESTING"] = True
+    response = application.app.test_client().get("/api/health")
     assert response.status_code == 200
-    assert response.json["ok"] is True
+    assert response.json == {"ok": True}
 
 
-def test_index_enables_automatic_export_when_blob_is_connected():
-    with patch.object(application, "APP_PASSWORD", ""), patch.dict(
-        os.environ, {"BLOB_READ_WRITE_TOKEN": "test-token"}
-    ):
-        response = client().get("/")
-    assert response.status_code == 200
-    assert b'input type="radio" name="export-mode" value="automatic" checked' in response.data
+def test_parser_groups_sample_order_and_keeps_all_products():
+    invoice, groups = parsed_fixture()
+    assert invoice == "4690899"
+    assert len(groups["WEB235520.0182"]) == 2
+    assert {item.reference for item in groups["WEB235520.0182"]} == {"650068.3", "135047"}
+    assert "WEB235522.0205" in groups
 
 
-def test_staged_upload_rejects_oversized_output():
-    with patch.object(application, "APP_PASSWORD", ""), patch.object(application, "DEMO_MODE", False):
-        response = client().post("/api/staged-uploads", json={"files": [{
-            "filename": "photo.jpg", "size": 20 * 1024 * 1024,
-        }]})
-    assert response.status_code == 400
+def test_pricing_formulas():
+    nine = application.Item("Ring 9CT YG", "A1", "", 2, Decimal("1.20"), "t", Decimal("8"), Decimal("10"))
+    eighteen = application.Item("Ring 18CT YG", "A2", "", 2, Decimal("1.20"), "t", Decimal("8"), Decimal("10"))
+    other = application.Item("Silver ring", "A3", "", 1, Decimal("1"), "a", Decimal("10"), Decimal("10"))
+    assert application.item_price(nine, Decimal("65.20"), Decimal("35")) == Decimal("49.28")
+    assert application.item_price(eighteen, Decimal("65.20"), Decimal("35")) == Decimal("88.40")
+    assert application.item_price(other, Decimal("65.20"), Decimal("35")) == Decimal("13.50")
 
 
-def test_attach_rejects_non_shopify_product_id():
-    with patch.object(application, "APP_PASSWORD", ""), patch.object(application, "DEMO_MODE", False):
-        response = client().post("/api/attach-image", json={
-            "product_id": "123", "resource_url": "https://example.com/image.jpg",
+def test_process_returns_one_csv_per_order_ref():
+    application.app.config["TESTING"] = True
+    reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: PDF_TEXT)])
+    with patch.object(application, "PdfReader", return_value=reader):
+        response = application.app.test_client().post("/api/process", data={
+            "invoice": (io.BytesIO(b"pdf"), "4690899.pdf"),
+            "gold_fix": "65.20",
+            "markup": "35",
         })
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.data)) as bundle:
+        names = bundle.namelist()
+        assert len(names) == 2
+        sample = bundle.read("invoice_4690899_WEB235520.0182.csv").decode("utf-8-sig")
+    assert "Issued by ComIreland Ltd" in sample
+    assert "Hoops earrings pair plain 9K YG" in sample
+
+
+def test_rejects_non_pdf_upload():
+    application.app.config["TESTING"] = True
+    response = application.app.test_client().post("/api/process", data={
+        "invoice": (io.BytesIO(b"not a pdf"), "invoice.txt"), "gold_fix": "65.20", "markup": "35",
+    })
     assert response.status_code == 400
-
-
-def test_catalog_returns_shopify_products():
-    products = [{"id": "gid://shopify/Product/1", "title": "Example"}]
-    with patch.object(application, "APP_PASSWORD", ""), patch.object(application, "DEMO_MODE", False), patch.object(
-        application.ShopifyClient, "get_products_page", return_value={
-            "products": products, "has_next_page": False, "end_cursor": None,
-        }
-    ):
-        response = client().get("/api/products")
-    assert response.status_code == 200
-    assert response.json["products"] == products
-
-
-def test_temporary_image_upload_returns_public_blob_url():
-    blob_client = Mock()
-    blob_client.put.return_value = SimpleNamespace(url="https://example.public.blob.vercel-storage.com/image.jpg")
-    with patch.object(application, "APP_PASSWORD", ""), patch.object(
-        application, "blob_client", return_value=blob_client
-    ), patch.dict(os.environ, {"BLOB_READ_WRITE_TOKEN": "test-token"}):
-        response = client().post(
-            "/api/temporary-image?filename=Example%20Photo.png",
-            data=b"jpeg-data",
-            content_type="image/jpeg",
-        )
-    assert response.status_code == 200
-    assert response.json["url"].startswith("https://")
-    pathname = blob_client.put.call_args.args[0]
-    assert pathname.startswith("shopify-imports/")
-    assert pathname.endswith("-Example-Photo.jpg")
-
-
-def test_temporary_image_upload_rejects_files_over_relay_limit():
-    with patch.object(application, "APP_PASSWORD", ""), patch.object(
-        application, "blob_client", return_value=Mock()
-    ), patch.dict(os.environ, {"BLOB_READ_WRITE_TOKEN": "test-token"}):
-        response = client().post(
-            "/api/temporary-image?filename=large.jpg",
-            data=b"x" * (application.TEMP_IMAGE_MAX_BYTES + 1),
-            content_type="image/jpeg",
-        )
-    assert response.status_code == 413
-
-
-def test_cleanup_deletes_only_expired_temporary_images():
-    expired = "https://example.public.blob.vercel-storage.com/expired.jpg"
-    future = "https://example.public.blob.vercel-storage.com/future.jpg"
-    listing = {
-        "blobs": [
-            {"pathname": "shopify-imports/999/expired.jpg", "url": expired},
-            {"pathname": "shopify-imports/2001/future.jpg", "url": future},
-        ],
-        "has_more": False,
-        "cursor": None,
-    }
-    delete = Mock()
-    with patch.object(application, "CRON_SECRET", "cron-secret"), patch.object(
-        application, "blob_list_objects", return_value=listing
-    ), patch.object(
-        application, "blob_delete", delete
-    ), patch.object(application.time, "time", return_value=1000), patch.dict(
-        os.environ, {"BLOB_READ_WRITE_TOKEN": "test-token"}
-    ):
-        response = client().get(
-            "/api/cleanup-temporary-images",
-            headers={"Authorization": "Bearer cron-secret"},
-        )
-    assert response.status_code == 200
-    assert response.json["deleted"] == 1
-    delete.assert_called_once_with([expired])

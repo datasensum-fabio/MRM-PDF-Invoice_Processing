@@ -3,18 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Shopify Image Matcher{% endblock %}</title>
+  <title>ComIreland Invoice Studio</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='demo.css') }}">
 </head>
 <body>
-  <header><a href="{{ url_for('index') }}">Shopify Image Matcher</a></header>
-  <main>
-    {% for category, message in get_flashed_messages(with_categories=true) %}
-      <div class="notice {{ category }}">{{ message }}</div>
-    {% endfor %}
-    {% block content %}{% endblock %}
-  </main>
+  <header><a href="{{ url_for('index') }}"><span>CI</span> ComIreland Invoice Studio</a></header>
+  <main>{% block content %}{% endblock %}</main>
 </body>
 </html>
-
