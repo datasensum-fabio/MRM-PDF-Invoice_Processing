@@ -48,7 +48,25 @@ function showResults(data) {
     link.download = file.filename;
     link.textContent = 'Download CSV ↓';
     row.append(details, link);
-    fileList.append(row);
+
+    const preview = document.createElement('details');
+    preview.className = 'csv-preview';
+    preview.innerHTML = '<summary>Preview CSV</summary><div class="preview-scroll"><table><tbody></tbody></table></div>';
+    const body = preview.querySelector('tbody');
+    file.preview_rows.forEach((values, rowIndex) => {
+      const tableRow = document.createElement('tr');
+      const columns = Math.max(values.length, 8);
+      for (let column = 0; column < columns; column += 1) {
+        const cell = document.createElement(rowIndex === 5 ? 'th' : 'td');
+        cell.textContent = values[column] ?? '';
+        tableRow.append(cell);
+      }
+      body.append(tableRow);
+    });
+    const result = document.createElement('article');
+    result.className = 'file-card';
+    result.append(row, preview);
+    fileList.append(result);
   });
   results.classList.remove('hidden');
   results.scrollIntoView({ behavior: 'smooth', block: 'start' });

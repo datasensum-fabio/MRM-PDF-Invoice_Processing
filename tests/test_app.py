@@ -32,8 +32,9 @@ def test_health():
 def test_parser_groups_sample_order_and_keeps_all_products():
     invoice, groups = parsed_fixture()
     assert invoice == "4690899"
-    assert len(groups["WEB235520.0182"]) == 2
-    assert {item.reference for item in groups["WEB235520.0182"]} == {"650068.3", "135047"}
+    assert groups["WEB235520.0182"].label == "Order WEB - Ref : WEB235520.0182"
+    assert len(groups["WEB235520.0182"].items) == 2
+    assert {item.reference for item in groups["WEB235520.0182"].items} == {"650068.3", "135047"}
     assert "WEB235522.0205" in groups
 
 
@@ -58,11 +59,16 @@ def test_process_returns_one_csv_per_order_ref():
     assert response.status_code == 200
     assert response.json["invoice"] == "4690899"
     assert len(response.json["files"]) == 2
-    selected = next(file for file in response.json["files"] if file["order_ref"] == "WEB235520.0182")
+    selected = next(file for file in response.json["files"] if file["order_ref"] == "Order WEB - Ref : WEB235520.0182")
     assert selected["filename"] == "invoice_4690899_WEB235520.0182.csv"
     assert selected["item_count"] == 2
     sample = base64.b64decode(selected["content_base64"]).decode("utf-8-sig")
-    assert "Issued by ComIreland Ltd" in sample
+    assert sample.startswith("\r\n")
+    assert "Issued by ComIreland Ltd" not in sample
+    assert "Order WEB - Ref : WEB235520.0182" in sample
+    assert selected["preview_rows"][0] == []
+    assert selected["preview_rows"][7] == []
+    assert selected["preview_rows"][8][0] == "Hoops earrings pair plain 9K YG"
     assert "Hoops earrings pair plain 9K YG" in sample
 
 

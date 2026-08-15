@@ -42,6 +42,13 @@ class Item:
     supplier_unit: Decimal
 
 
+@dataclass
+class OrderGroup:
+    reference: str
+    label: str
+    items: list[Item]
+
+
 def decimal_value(value: str) -> Decimal:
     return Decimal(value.replace(" ", "").replace(",", "."))
 
@@ -76,27 +83,27 @@ def parse_item(line: str) -> Item | None:
     return Item(description, reference, size, qty, metal, tokens[mode_index].lower(), labour, supplier_unit)
 
 
-def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, list[Item]]]:
+def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
     reader = PdfReader(pdf_stream)
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
     invoice_match = INVOICE.search(text)
     if not invoice_match:
         raise ValueError("The PDF does not contain a recognizable invoice number.")
-    groups: OrderedDict[str, list[Item]] = OrderedDict()
+    groups: OrderedDict[str, OrderGroup] = OrderedDict()
     current_ref: str | None = None
     for raw_line in text.splitlines():
         line = " ".join(raw_line.split()).strip()
         order_match = ORDER.match(line)
         if order_match:
             current_ref = order_match.group(2).strip().split()[0]
-            groups.setdefault(current_ref, [])
+            groups.setdefault(current_ref, OrderGroup(current_ref, line, []))
             continue
         if not current_ref or not line or line.startswith(SKIP_PREFIXES):
             continue
         item = parse_item(line)
         if item:
-            groups[current_ref].append(item)
-    groups = OrderedDict((ref, items) for ref, items in groups.items() if items)
+            groups[current_ref].items.append(item)
+    groups = OrderedDict((ref, group) for ref, group in groups.items() if group.items)
     if not groups:
         raise ValueError("No product rows grouped by Order Ref were found in this PDF.")
     return invoice_match.group(1), groups
@@ -117,23 +124,31 @@ def euro(value: Decimal) -> str:
     return f"€ {value:.2f}"
 
 
-def csv_for_order(invoice: str, order_ref: str, items: list[Item], gold_fix: Decimal, markup: Decimal) -> bytes:
-    output = io.StringIO(newline="")
-    writer = csv.writer(output)
-    writer.writerow([f"Date {date.today():%d/%m/%Y}", "Gold Fix", euro(gold_fix), "", "", "", "", "", ""])
-    writer.writerow([f"Invoice #{invoice}", "", "", "", "", "", "", "", ""])
-    writer.writerow(["Issued by ComIreland Ltd", "", "", "", "", "", "", "", ""])
-    writer.writerow([f"Order Ref : {order_ref}", "", "", "", "", "", "", "", ""])
-    writer.writerow([])
-    writer.writerow(["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"])
-    priced = [(item, item_price(item, gold_fix, markup)) for item in items]
+def csv_rows_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal) -> list[list]:
+    priced = [(item, item_price(item, gold_fix, markup)) for item in group.items]
     grand_total = sum((unit * item.qty for item, unit in priced), Decimal("0")).quantize(MONEY)
-    writer.writerow(["", "", "", "", "", "", "", euro(grand_total)])
+    rows = [
+        [],
+        [f"Date {date.today():%d/%m/%Y}", "Gold Fix", euro(gold_fix), "", "", "", "", "", ""],
+        [f"Invoice #{invoice}", "", "", "", "", "", "", "", ""],
+        [group.label, "", "", "", "", "", "", "", ""],
+        [],
+        ["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"],
+        ["", "", "", "", "", "", "", euro(grand_total)],
+        [],
+    ]
     for item, unit in priced:
-        writer.writerow([
+        rows.append([
             item.description, item.reference, item.size, item.qty,
             f"{item.metal:.2f}".replace(".", ","), item.mode, euro(unit), euro(unit * item.qty),
         ])
+    return rows
+
+
+def csv_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerows(csv_rows_for_order(invoice, group, gold_fix, markup))
     return "\ufeff".encode("utf-8") + output.getvalue().encode("utf-8")
 
 
@@ -161,13 +176,14 @@ def process_invoice():
     try:
         invoice, groups = extract_invoice(uploaded.stream)
         files = []
-        for order_ref, items in groups.items():
-            content = csv_for_order(invoice, order_ref, items, gold_fix, markup)
+        for order_ref, group in groups.items():
+            content = csv_for_order(invoice, group, gold_fix, markup)
             files.append({
-                "order_ref": order_ref,
+                "order_ref": group.label,
                 "filename": f"invoice_{invoice}_{safe_name(order_ref)}.csv",
                 "content_base64": base64.b64encode(content).decode("ascii"),
-                "item_count": len(items),
+                "item_count": len(group.items),
+                "preview_rows": csv_rows_for_order(invoice, group, gold_fix, markup),
             })
         return jsonify(invoice=invoice, files=files)
     except (ValueError, InvalidOperation) as exc:
