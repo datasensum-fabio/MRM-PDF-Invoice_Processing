@@ -11,9 +11,32 @@ const fileList = document.querySelector('#file-list');
 const downloadAll = document.querySelector('#download-all');
 const downloadAllPdfs = document.querySelector('#download-all-pdfs');
 const goldFixInput = document.querySelector('#gold-fix');
+const nonGoldMarkupInput = document.querySelector('#non-gold-markup');
+const goldMarkupInput = document.querySelector('#gold-markup');
 const lastGoldFix = document.querySelector('#last-gold-fix');
 const LAST_GOLD_FIX_KEY = 'comireland-last-gold-fix';
 let generatedFiles = [];
+
+function enteredNumber(input, fallback) {
+  const value = Number(input.value);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function updatePricingRules() {
+  const goldFix = enteredNumber(goldFixInput, null);
+  const nonGoldMarkup = enteredNumber(nonGoldMarkupInput, 35);
+  const goldMarkup = enteredNumber(goldMarkupInput, 27);
+  const nonGoldMultiplier = (1 + nonGoldMarkup / 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  const goldMultiplier = (1 + goldMarkup / 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  const goldFixText = goldFix === null || goldFix <= 0 ? '[enter Gold Fix]' : `€${goldFix.toFixed(2)}`;
+  document.querySelector('#formula-non-gold').textContent = `Non-gold: Supplier Unit Price × ${nonGoldMultiplier} (${nonGoldMarkup}% markup)`;
+  document.querySelector('#formula-9ct').textContent = `9CT/9K, Mode t: ${goldFixText} × Metal ÷ Qty + Supplier Unit Price × ${goldMultiplier} (${goldMarkup}% markup)`;
+  document.querySelector('#formula-18ct').textContent = `18CT/18K, Mode t: ${goldFixText} × Metal × 2 ÷ Qty + Supplier Unit Price × ${goldMultiplier} (${goldMarkup}% markup)`;
+  document.querySelector('#formula-other-gold').textContent = `Gold, another Mode: Supplier Unit Price × ${goldMultiplier} (${goldMarkup}% markup; Metal not included)`;
+}
+
+[goldFixInput, nonGoldMarkupInput, goldMarkupInput].forEach(field => field.addEventListener('input', updatePricingRules));
+updatePricingRules();
 
 function displayLastGoldFix(value) {
   const parsed = Number(value);
@@ -142,6 +165,7 @@ form.addEventListener('submit', async event => {
     }
     displayLastGoldFix(usedGoldFix);
     goldFixInput.value = '';
+    updatePricingRules();
     message.className = 'message success';
     message.textContent = 'Done — choose individual files below or download them all.';
   } catch (error) {

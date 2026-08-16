@@ -24,15 +24,18 @@
     </div>
     <div class="fields">
       <label><span>New gold fix price (€)</span><input id="gold-fix" name="gold_fix" type="number" min="0.01" step="0.01" autocomplete="off" required></label>
-      <label><span>Non-gold Items Markup (%)</span><input name="markup" type="number" min="0" step="0.01" value="35" required></label>
-      <label><span>Gold markup (%)</span><input name="gold_markup" type="number" min="0" step="0.01" value="27" required></label>
+      <label><span>Non-gold Items Markup (%)</span><input id="non-gold-markup" name="markup" type="number" min="0" step="0.01" value="35" required></label>
+      <label><span>Gold markup (%)</span><input id="gold-markup" name="gold_markup" type="number" min="0" step="0.01" value="27" required></label>
     </div>
     <div class="formula-note">
-      <strong>Pricing rules</strong>
-      <span>Non-gold items: Unit Price × (1 + Non-gold Items Markup)</span>
-      <span>9CT/9K, Mode t: Gold Fix × Metal ÷ Qty + Unit Price × (1 + Gold Markup)</span>
-      <span>18CT/18K, Mode t: Gold Fix × Metal × 2 ÷ Qty + Unit Price × (1 + Gold Markup)</span>
-      <span>Gold items with another Mode: Unit Price × (1 + Gold Markup)</span>
+      <strong>How the calculated Unit Price is determined</strong>
+      <span id="formula-non-gold"></span>
+      <span id="formula-9ct"></span>
+      <span id="formula-18ct"></span>
+      <span id="formula-other-gold"></span>
+      <strong>Quantity and line totals</strong>
+      <span>For Mode t, ÷ Qty converts the line’s total Metal into Metal per unit.</span>
+      <span>For every item: Line Total = Calculated Unit Price × Qty.</span>
     </div>
     <button id="submit" type="submit">Process invoice <span>→</span></button>
     <p id="message" class="message" role="status" aria-live="polite"></p>
