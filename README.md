@@ -5,8 +5,10 @@ A focused web app that converts Robbez PDF invoices into individually downloadab
 ## Pricing rules
 
 - Standard products: supplier unit price plus the chosen markup (35% by default).
-- 9CT/9K gold: `Gold Fix × Metal ÷ Qty + Labour × 1.27`.
-- 18CT/18K gold: `Gold Fix × Metal × 2 ÷ Qty + Labour × 1.27`.
+- Gold markup is adjustable and defaults to 27%.
+- 9CT/9K gold in Mode `t`: `Gold Fix × Metal ÷ Qty + supplier unit price × 1.27`.
+- 18CT/18K gold in Mode `t`: `Gold Fix × Metal × 2 ÷ Qty + supplier unit price × 1.27`.
+- Gold items in another Mode: supplier unit price plus the chosen gold markup, with no metal component.
 - Unit and line totals are rounded to euro cents.
 
 The invoice date is the date on which the file is processed. The input PDF is handled in memory and is not retained.

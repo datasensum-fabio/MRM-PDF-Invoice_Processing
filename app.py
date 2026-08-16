@@ -120,12 +120,15 @@ def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
     return invoice_match.group(1), groups
 
 
-def item_price(item: Item, gold_fix: Decimal, markup: Decimal) -> Decimal:
+def item_price(item: Item, gold_fix: Decimal, markup: Decimal, gold_markup: Decimal) -> Decimal:
     description = item.description.upper()
-    if "18CT" in description or "18K" in description:
-        value = gold_fix * item.metal * Decimal("2") / item.qty + item.labour * Decimal("1.27")
-    elif "9CT" in description or "9K" in description:
-        value = gold_fix * item.metal / item.qty + item.labour * Decimal("1.27")
+    is_18ct = "18CT" in description or "18K" in description
+    is_9ct = "9CT" in description or "9K" in description
+    if is_18ct or is_9ct:
+        value = item.supplier_unit * (Decimal("1") + gold_markup / Decimal("100"))
+        if item.mode.lower() == "t":
+            gold_multiplier = Decimal("2") if is_18ct else Decimal("1")
+            value += gold_fix * item.metal * gold_multiplier / item.qty
     else:
         value = item.supplier_unit * (Decimal("1") + markup / Decimal("100"))
     return value.quantize(MONEY, rounding=ROUND_HALF_UP)
@@ -135,8 +138,8 @@ def euro(value: Decimal) -> str:
     return f"€ {value:.2f}"
 
 
-def csv_rows_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal) -> list[list]:
-    priced = [(item, item_price(item, gold_fix, markup)) for item in group.items]
+def csv_rows_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal, gold_markup: Decimal) -> list[list]:
+    priced = [(item, item_price(item, gold_fix, markup, gold_markup)) for item in group.items]
     grand_total = sum((unit * item.qty for item, unit in priced), Decimal("0")).quantize(MONEY)
     rows = [
         [],
@@ -156,14 +159,14 @@ def csv_rows_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, marku
     return rows
 
 
-def csv_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal) -> bytes:
+def csv_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal, gold_markup: Decimal) -> bytes:
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerows(csv_rows_for_order(invoice, group, gold_fix, markup))
+    writer.writerows(csv_rows_for_order(invoice, group, gold_fix, markup, gold_markup))
     return "\ufeff".encode("utf-8") + output.getvalue().encode("utf-8")
 
 
-def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal) -> bytes:
+def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: Decimal, gold_markup: Decimal) -> bytes:
     output = io.BytesIO()
     styles = getSampleStyleSheet()
     body = ParagraphStyle("InvoiceBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=8, leading=10)
@@ -190,7 +193,7 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
     story = [
         Paragraph(f"Invoice #{escape(invoice)}", styles["Title"]),
         Spacer(1, 3 * mm),
-        paragraph(f"Date {date.today():%d/%m/%Y}    ·    Gold Fix € {gold_fix:.2f}"),
+        paragraph(f"Date {date.today():%d/%m/%Y}    ·    Gold Fix € {gold_fix:.2f}    ·    Gold Markup {gold_markup:.2f}%"),
         Spacer(1, 2 * mm),
         Paragraph(escape(group.label), styles["Heading2"]),
         Spacer(1, 4 * mm),
@@ -199,7 +202,7 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
                    ["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"]]]
     order_total = Decimal("0")
     for item in group.items:
-        unit = item_price(item, gold_fix, markup)
+        unit = item_price(item, gold_fix, markup, gold_markup)
         total = (unit * item.qty).quantize(MONEY)
         order_total += total
         table_rows.append([
@@ -246,16 +249,17 @@ def process_invoice():
     try:
         gold_fix = decimal_value(request.form.get("gold_fix", ""))
         markup = decimal_value(request.form.get("markup", "35"))
-        if gold_fix <= 0 or markup < 0:
+        gold_markup = decimal_value(request.form.get("gold_markup", "27"))
+        if gold_fix <= 0 or markup < 0 or gold_markup < 0:
             raise InvalidOperation
     except (InvalidOperation, ValueError):
-        return jsonify(error="Enter a valid positive gold fix and a non-negative markup."), 400
+        return jsonify(error="Enter a valid positive gold fix and non-negative markup values."), 400
     try:
         invoice, groups = extract_invoice(uploaded.stream)
         files = []
         for order_ref, group in groups.items():
-            content = csv_for_order(invoice, group, gold_fix, markup)
-            pdf_content = pdf_for_order(invoice, group, gold_fix, markup)
+            content = csv_for_order(invoice, group, gold_fix, markup, gold_markup)
+            pdf_content = pdf_for_order(invoice, group, gold_fix, markup, gold_markup)
             files.append({
                 "order_ref": group.label,
                 "filename": f"invoice_{invoice}_{safe_name(order_ref)}.csv",
@@ -263,7 +267,7 @@ def process_invoice():
                 "pdf_filename": f"invoice_{invoice}_{safe_name(order_ref)}.pdf",
                 "pdf_base64": base64.b64encode(pdf_content).decode("ascii"),
                 "item_count": len(group.items),
-                "preview_rows": csv_rows_for_order(invoice, group, gold_fix, markup),
+                "preview_rows": csv_rows_for_order(invoice, group, gold_fix, markup, gold_markup),
             })
         return jsonify(invoice=invoice, files=files)
     except (ValueError, InvalidOperation) as exc:

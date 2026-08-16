@@ -47,10 +47,12 @@ def test_parser_groups_sample_order_and_keeps_all_products():
 def test_pricing_formulas():
     nine = application.Item("Ring 9CT YG", "A1", "", 2, Decimal("1.20"), "t", Decimal("8"), Decimal("10"))
     eighteen = application.Item("Ring 18CT YG", "A2", "", 2, Decimal("1.20"), "t", Decimal("8"), Decimal("10"))
+    gold_without_metal = application.Item("Ring 9K YG", "A4", "", 2, Decimal("1.20"), "a", Decimal("8"), Decimal("10"))
     other = application.Item("Silver ring", "A3", "", 1, Decimal("1"), "a", Decimal("10"), Decimal("10"))
-    assert application.item_price(nine, Decimal("65.20"), Decimal("35")) == Decimal("49.28")
-    assert application.item_price(eighteen, Decimal("65.20"), Decimal("35")) == Decimal("88.40")
-    assert application.item_price(other, Decimal("65.20"), Decimal("35")) == Decimal("13.50")
+    assert application.item_price(nine, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("51.82")
+    assert application.item_price(eighteen, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("90.94")
+    assert application.item_price(gold_without_metal, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("12.70")
+    assert application.item_price(other, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("13.50")
 
 
 def test_process_returns_one_csv_per_order_ref():
@@ -61,6 +63,7 @@ def test_process_returns_one_csv_per_order_ref():
             "invoice": (io.BytesIO(b"pdf"), "4690899.pdf"),
             "gold_fix": "65.20",
             "markup": "35",
+            "gold_markup": "27",
         })
     assert response.status_code == 200
     assert response.json["invoice"] == "4690899"
@@ -80,11 +83,12 @@ def test_process_returns_one_csv_per_order_ref():
     assert selected["preview_rows"][8][0] == "Hoops earrings pair plain 9K YG\nCountermark :Dorothy"
     assert "Countermark :Dorothy" in sample
     assert "Hoops earrings pair plain 9K YG" in sample
+    assert "€ 90.13" in sample
 
 
 def test_rejects_non_pdf_upload():
     application.app.config["TESTING"] = True
     response = application.app.test_client().post("/api/process", data={
-        "invoice": (io.BytesIO(b"not a pdf"), "invoice.txt"), "gold_fix": "65.20", "markup": "35",
+        "invoice": (io.BytesIO(b"not a pdf"), "invoice.txt"), "gold_fix": "65.20", "markup": "35", "gold_markup": "27",
     })
     assert response.status_code == 400

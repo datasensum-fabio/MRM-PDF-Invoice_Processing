@@ -25,11 +25,13 @@
     <div class="fields">
       <label><span>New gold fix price (€)</span><input id="gold-fix" name="gold_fix" type="number" min="0.01" step="0.01" autocomplete="off" required></label>
       <label><span>Standard markup (%)</span><input name="markup" type="number" min="0" step="0.01" value="35" required></label>
+      <label><span>Gold markup (%)</span><input name="gold_markup" type="number" min="0" step="0.01" value="27" required></label>
     </div>
     <div class="formula-note">
       <strong>Gold pricing</strong>
-      <span>9CT: Gold Fix × Metal ÷ Qty + Labour × 1.27</span>
-      <span>18CT: Gold Fix × Metal × 2 ÷ Qty + Labour × 1.27</span>
+      <span>9CT/9K, Mode t: Gold Fix × Metal ÷ Qty + Unit × (1 + Gold Markup)</span>
+      <span>18CT/18K, Mode t: Gold Fix × Metal × 2 ÷ Qty + Unit × (1 + Gold Markup)</span>
+      <span>Gold items with another Mode: Unit × (1 + Gold Markup)</span>
     </div>
     <button id="submit" type="submit">Process invoice <span>→</span></button>
     <p id="message" class="message" role="status" aria-live="polite"></p>
