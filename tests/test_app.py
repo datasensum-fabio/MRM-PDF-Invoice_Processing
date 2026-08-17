@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import app as application
+from pypdf import PdfReader
 
 
 PDF_TEXT = """Invoice #4690899
@@ -55,6 +56,15 @@ def test_pricing_formulas():
     assert application.item_price(other, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("13.50")
 
 
+def test_uses_your_reference_when_reference_is_empty():
+    item = application.parse_item(
+        "Custom engraved pendant CLIENTREF 1 0,50 a 10,00 10,00 10,00"
+    )
+    assert item is not None
+    assert item.description == "Custom engraved pendant"
+    assert item.reference == "CLIENTREF"
+
+
 def test_process_returns_one_csv_per_order_ref():
     application.app.config["TESTING"] = True
     reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: PDF_TEXT)])
@@ -75,6 +85,9 @@ def test_process_returns_one_csv_per_order_ref():
     pdf = base64.b64decode(selected["pdf_base64"])
     assert selected["pdf_filename"] == "invoice_4690899_WEB235520.0182.pdf"
     assert pdf.startswith(b"%PDF-")
+    pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Markup" not in pdf_text
+    assert "27" not in pdf_text.split("Gold Fix", 1)[-1].split("Order WEB", 1)[0]
     assert sample.startswith("\r\n")
     assert "Issued by ComIreland Ltd" not in sample
     assert "Order WEB - Ref : WEB235520.0182" in sample

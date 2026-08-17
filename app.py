@@ -81,9 +81,9 @@ def parse_item(line: str) -> Item | None:
         ref_index -= 1
     if ref_index < 0:
         return None
+    # Empty PDF table cells disappear during text extraction. The rightmost
+    # value before Size/Qty is Reference when present, otherwise Your Reference.
     reference = tokens[ref_index]
-    if not any(char.isdigit() for char in reference):
-        return None
     description = " ".join(tokens[:ref_index]).strip()
     labour = decimal_value(after[0])
     supplier_unit = decimal_value(after[-2] if len(after) == 3 else after[0])
@@ -193,7 +193,7 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
     story = [
         Paragraph(f"Invoice #{escape(invoice)}", styles["Title"]),
         Spacer(1, 3 * mm),
-        paragraph(f"Date {date.today():%d/%m/%Y}    ·    Gold Fix € {gold_fix:.2f}    ·    Gold Markup {gold_markup:.2f}%"),
+        paragraph(f"Date {date.today():%d/%m/%Y}    ·    Gold Fix € {gold_fix:.2f}"),
         Spacer(1, 2 * mm),
         Paragraph(escape(group.label), styles["Heading2"]),
         Spacer(1, 4 * mm),
