@@ -85,7 +85,9 @@ def test_process_returns_one_csv_per_order_ref():
     pdf = base64.b64decode(selected["pdf_base64"])
     assert selected["pdf_filename"] == "invoice_4690899_WEB235520.0182.pdf"
     assert pdf.startswith(b"%PDF-")
-    pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+    pdf_reader = PdfReader(io.BytesIO(pdf))
+    assert all(float(page.mediabox.height) > float(page.mediabox.width) for page in pdf_reader.pages)
+    pdf_text = "\n".join(page.extract_text() or "" for page in pdf_reader.pages)
     assert "Markup" not in pdf_text
     assert "27" not in pdf_text.split("Gold Fix", 1)[-1].split("Order WEB", 1)[0]
     assert sample.startswith("\r\n")

@@ -15,7 +15,7 @@ from flask import Flask, jsonify, render_template, request
 from pypdf import PdfReader
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
@@ -183,11 +183,11 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(colors.HexColor("#657386"))
         canvas.drawString(15 * mm, 9 * mm, f"Invoice #{invoice} · {group.label}")
-        canvas.drawRightString(282 * mm, 9 * mm, f"Page {document.page}")
+        canvas.drawRightString(A4[0] - 15 * mm, 9 * mm, f"Page {document.page}")
         canvas.restoreState()
 
     document = SimpleDocTemplate(
-        output, pagesize=landscape(A4), leftMargin=15 * mm, rightMargin=15 * mm,
+        output, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
         topMargin=14 * mm, bottomMargin=15 * mm, title=f"Invoice {invoice} - {group.reference}",
     )
     story = [
@@ -212,7 +212,7 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
         ])
     table_rows.append([paragraph("Order total", right), "", "", "", "", "", "",
                        paragraph(euro(order_total), right)])
-    table = Table(table_rows, colWidths=[91 * mm, 26 * mm, 14 * mm, 14 * mm, 18 * mm, 15 * mm, 25 * mm, 27 * mm],
+    table = Table(table_rows, colWidths=[63 * mm, 23 * mm, 12 * mm, 10 * mm, 14 * mm, 11 * mm, 22 * mm, 25 * mm],
                   repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#12233B")),
