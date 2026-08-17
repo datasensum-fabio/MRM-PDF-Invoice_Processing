@@ -1,6 +1,7 @@
 import io
 import base64
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -107,3 +108,11 @@ def test_rejects_non_pdf_upload():
         "invoice": (io.BytesIO(b"not a pdf"), "invoice.txt"), "gold_fix": "65.20", "markup": "35", "gold_markup": "27",
     })
     assert response.status_code == 400
+
+
+def test_drag_and_drop_prevents_browser_pdf_navigation():
+    javascript = Path(application.app.root_path) / "static" / "app.js"
+    source = javascript.read_text(encoding="utf-8")
+    assert "document.addEventListener('drop', event => event.preventDefault())" in source
+    assert "dropzone.addEventListener('drop'" in source
+    assert "input.files = droppedFiles" in source

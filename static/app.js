@@ -136,8 +136,29 @@ function showFile() {
 }
 
 input.addEventListener('change', showFile);
-['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, () => dropzone.classList.add('dragging')));
-['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, () => dropzone.classList.remove('dragging')));
+document.addEventListener('dragover', event => event.preventDefault());
+document.addEventListener('drop', event => event.preventDefault());
+['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, event => {
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  dropzone.classList.add('dragging');
+}));
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragging'));
+dropzone.addEventListener('drop', event => {
+  event.preventDefault();
+  dropzone.classList.remove('dragging');
+  const droppedFiles = event.dataTransfer?.files;
+  const file = droppedFiles?.[0];
+  if (droppedFiles?.length !== 1 || !file || (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf')) {
+    message.className = 'message error';
+    message.textContent = 'Drop one PDF invoice in the upload box.';
+    return;
+  }
+  input.files = droppedFiles;
+  message.className = 'message';
+  message.textContent = '';
+  showFile();
+});
 downloadAll.addEventListener('click', () => generatedFiles.forEach(triggerDownload));
 downloadAllPdfs.addEventListener('click', () => generatedFiles.forEach(file => triggerDownload({
   url: file.pdfUrl,
