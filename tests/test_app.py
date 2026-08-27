@@ -89,9 +89,13 @@ def test_process_returns_one_csv_per_order_ref():
     pdf_reader = PdfReader(io.BytesIO(pdf))
     assert all(float(page.mediabox.height) > float(page.mediabox.width) for page in pdf_reader.pages)
     pdf_text = "\n".join(page.extract_text() or "" for page in pdf_reader.pages)
+    assert "DELIVERY NOTE #4690899" in pdf_text
+    assert "Invoice #4690899" not in pdf_text
     assert "Markup" not in pdf_text
     assert "27" not in pdf_text.split("Gold Fix", 1)[-1].split("Order WEB", 1)[0]
     assert sample.startswith("\r\n")
+    assert "DELIVERY NOTE #4690899" in sample
+    assert "Invoice #4690899" not in sample
     assert "Issued by ComIreland Ltd" not in sample
     assert "Order WEB - Ref : WEB235520.0182" in sample
     assert selected["preview_rows"][0] == []

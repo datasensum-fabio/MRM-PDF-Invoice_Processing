@@ -144,7 +144,7 @@ def csv_rows_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, marku
     rows = [
         [],
         [f"Date {date.today():%d/%m/%Y}", "Gold Fix", euro(gold_fix), "", "", "", "", "", ""],
-        [f"Invoice #{invoice}", "", "", "", "", "", "", "", ""],
+        [f"DELIVERY NOTE #{invoice}", "", "", "", "", "", "", "", ""],
         [group.label, "", "", "", "", "", "", "", ""],
         [],
         ["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"],
@@ -182,16 +182,16 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
         canvas.saveState()
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(colors.HexColor("#657386"))
-        canvas.drawString(15 * mm, 9 * mm, f"Invoice #{invoice} · {group.label}")
+        canvas.drawString(15 * mm, 9 * mm, f"DELIVERY NOTE #{invoice} · {group.label}")
         canvas.drawRightString(A4[0] - 15 * mm, 9 * mm, f"Page {document.page}")
         canvas.restoreState()
 
     document = SimpleDocTemplate(
         output, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
-        topMargin=14 * mm, bottomMargin=15 * mm, title=f"Invoice {invoice} - {group.reference}",
+        topMargin=14 * mm, bottomMargin=15 * mm, title=f"DELIVERY NOTE #{invoice} - {group.reference}",
     )
     story = [
-        Paragraph(f"Invoice #{escape(invoice)}", styles["Title"]),
+        Paragraph(f"DELIVERY NOTE #{escape(invoice)}", styles["Title"]),
         Spacer(1, 3 * mm),
         paragraph(f"Date {date.today():%d/%m/%Y}    ·    Gold Fix € {gold_fix:.2f}"),
         Spacer(1, 2 * mm),
