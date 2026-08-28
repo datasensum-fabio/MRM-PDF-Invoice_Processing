@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import app as application
+from openpyxl import load_workbook
 from pypdf import PdfReader
 
 
@@ -79,6 +80,12 @@ def test_process_returns_one_csv_per_order_ref():
     assert response.status_code == 200
     assert response.json["invoice"] == "4690899"
     assert len(response.json["files"]) == 2
+    assert response.json["excel_filename"] == "delivery_note_4690899_all_orders.xlsx"
+    workbook = load_workbook(io.BytesIO(base64.b64decode(response.json["excel_base64"])), data_only=False)
+    assert workbook.sheetnames == ["WEB235520.0182", "WEB235522.0205"]
+    assert workbook["WEB235520.0182"]["A1"].value == "DELIVERY NOTE #4690899"
+    assert workbook["WEB235520.0182"]["H8"].value == "=SUM(H6:H7)"
+    assert workbook["WEB235522.0205"]["A3"].value == "Order WEB - Ref : WEB235522.0205 note for warehouse"
     selected = next(file for file in response.json["files"] if file["order_ref"] == "Order WEB - Ref : WEB235520.0182")
     assert selected["filename"] == "invoice_4690899_WEB235520.0182.csv"
     assert selected["item_count"] == 2

@@ -12,6 +12,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from xml.sax.saxutils import escape
 
 from flask import Flask, jsonify, render_template, request
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from pypdf import PdfReader
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -232,6 +234,103 @@ def pdf_for_order(invoice: str, group: OrderGroup, gold_fix: Decimal, markup: De
     return output.getvalue()
 
 
+def xlsx_for_orders(invoice: str, groups: OrderedDict[str, OrderGroup], gold_fix: Decimal,
+                    markup: Decimal, gold_markup: Decimal) -> bytes:
+    workbook = Workbook()
+    used_sheet_names: set[str] = set()
+    navy = "12233B"
+    pale_blue = "EDF4FF"
+    white = "FFFFFF"
+    line = Side(style="thin", color="DCE3EB")
+    currency_format = '€ #,##0.00'
+
+    for index, (order_ref, group) in enumerate(groups.items()):
+        base_name = re.sub(r"[\\/*?:\[\]]", "_", order_ref).strip() or f"Order {index + 1}"
+        base_name = base_name[:31]
+        sheet_name = base_name
+        suffix = 2
+        while sheet_name.casefold() in used_sheet_names:
+            marker = f"_{suffix}"
+            sheet_name = f"{base_name[:31 - len(marker)]}{marker}"
+            suffix += 1
+        used_sheet_names.add(sheet_name.casefold())
+
+        sheet = workbook.active if index == 0 else workbook.create_sheet()
+        sheet.title = sheet_name
+        sheet.sheet_view.showGridLines = False
+        sheet.freeze_panes = "A6"
+        sheet.merge_cells("A1:H1")
+        sheet["A1"] = f"DELIVERY NOTE #{invoice}"
+        sheet["A1"].font = Font(name="Arial", size=18, bold=True, color=navy)
+        sheet["A1"].alignment = Alignment(vertical="center")
+        sheet.row_dimensions[1].height = 28
+        sheet["A2"] = "Date"
+        sheet["B2"] = date.today()
+        sheet["B2"].number_format = "dd/mm/yyyy"
+        sheet["D2"] = "Gold Fix"
+        sheet["E2"] = float(gold_fix)
+        sheet["E2"].number_format = currency_format
+        sheet.merge_cells("A3:H3")
+        sheet["A3"] = group.label
+        sheet["A3"].font = Font(name="Arial", size=12, bold=True, color=navy)
+
+        headers = ["Description", "Reference", "Size", "Qty", "Metal", "Mode", "Unit", "Total"]
+        for column, value in enumerate(headers, 1):
+            cell = sheet.cell(row=5, column=column, value=value)
+            cell.font = Font(name="Arial", size=10, bold=True, color=white)
+            cell.fill = PatternFill("solid", fgColor=navy)
+            cell.alignment = Alignment(vertical="center")
+        sheet.row_dimensions[5].height = 22
+
+        first_item_row = 6
+        for row, item in enumerate(group.items, first_item_row):
+            unit = item_price(item, gold_fix, markup, gold_markup)
+            values = [item.description, item.reference, item.size, item.qty, float(item.metal),
+                      item.mode, float(unit), float(unit * item.qty)]
+            for column, value in enumerate(values, 1):
+                cell = sheet.cell(row=row, column=column, value=value)
+                cell.font = Font(name="Arial", size=9)
+                cell.border = Border(bottom=line)
+                cell.alignment = Alignment(vertical="top", wrap_text=column == 1)
+            sheet.cell(row=row, column=4).number_format = "0"
+            sheet.cell(row=row, column=5).number_format = "0.00"
+            sheet.cell(row=row, column=7).number_format = currency_format
+            sheet.cell(row=row, column=8).number_format = currency_format
+            if "\n" in item.description:
+                sheet.row_dimensions[row].height = 30
+
+        total_row = first_item_row + len(group.items)
+        sheet.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=7)
+        sheet.cell(row=total_row, column=1, value="Order total")
+        sheet.cell(row=total_row, column=8, value=f"=SUM(H{first_item_row}:H{total_row - 1})")
+        for column in range(1, 9):
+            cell = sheet.cell(row=total_row, column=column)
+            cell.fill = PatternFill("solid", fgColor=pale_blue)
+            cell.font = Font(name="Arial", size=10, bold=True, color=navy)
+            cell.border = Border(top=line, bottom=line)
+        sheet.cell(row=total_row, column=1).alignment = Alignment(horizontal="right")
+        sheet.cell(row=total_row, column=8).number_format = currency_format
+        sheet.auto_filter.ref = f"A5:H{total_row - 1}"
+        sheet.column_dimensions["A"].width = 48
+        sheet.column_dimensions["B"].width = 18
+        sheet.column_dimensions["C"].width = 11
+        sheet.column_dimensions["D"].width = 8
+        sheet.column_dimensions["E"].width = 11
+        sheet.column_dimensions["F"].width = 9
+        sheet.column_dimensions["G"].width = 14
+        sheet.column_dimensions["H"].width = 14
+        sheet.print_title_rows = "1:5"
+        sheet.page_setup.orientation = "landscape"
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 0
+        sheet.sheet_properties.pageSetUpPr.fitToPage = True
+        sheet.print_area = f"A1:H{total_row}"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "order"
 
@@ -269,7 +368,13 @@ def process_invoice():
                 "item_count": len(group.items),
                 "preview_rows": csv_rows_for_order(invoice, group, gold_fix, markup, gold_markup),
             })
-        return jsonify(invoice=invoice, files=files)
+        xlsx_content = xlsx_for_orders(invoice, groups, gold_fix, markup, gold_markup)
+        return jsonify(
+            invoice=invoice,
+            files=files,
+            excel_filename=f"delivery_note_{invoice}_all_orders.xlsx",
+            excel_base64=base64.b64encode(xlsx_content).decode("ascii"),
+        )
     except (ValueError, InvalidOperation) as exc:
         return jsonify(error=str(exc)), 422
     except Exception:

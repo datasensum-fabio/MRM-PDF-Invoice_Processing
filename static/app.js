@@ -10,12 +10,14 @@ const resultsSummary = document.querySelector('#results-summary');
 const fileList = document.querySelector('#file-list');
 const downloadAll = document.querySelector('#download-all');
 const downloadAllPdfs = document.querySelector('#download-all-pdfs');
+const downloadExcel = document.querySelector('#download-excel');
 const goldFixInput = document.querySelector('#gold-fix');
 const nonGoldMarkupInput = document.querySelector('#non-gold-markup');
 const goldMarkupInput = document.querySelector('#gold-markup');
 const lastGoldFix = document.querySelector('#last-gold-fix');
 const LAST_GOLD_FIX_KEY = 'comireland-last-gold-fix';
 let generatedFiles = [];
+let generatedExcel = null;
 
 function enteredNumber(input, fallback) {
   const value = Number(input.value);
@@ -55,6 +57,8 @@ function clearGeneratedFiles() {
     URL.revokeObjectURL(file.pdfUrl);
   });
   generatedFiles = [];
+  if (generatedExcel) URL.revokeObjectURL(generatedExcel.url);
+  generatedExcel = null;
   fileList.replaceChildren();
   results.classList.add('hidden');
 }
@@ -85,8 +89,15 @@ function showResults(data) {
     url: URL.createObjectURL(csvBlob(file.content_base64)),
     pdfUrl: URL.createObjectURL(decodedBlob(file.pdf_base64, 'application/pdf')),
   }));
+  generatedExcel = {
+    filename: data.excel_filename,
+    url: URL.createObjectURL(decodedBlob(
+      data.excel_base64,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )),
+  };
   resultsTitle.textContent = `Invoice #${data.invoice} files`;
-  resultsSummary.textContent = `${generatedFiles.length} individual CSV ${generatedFiles.length === 1 ? 'file' : 'files'} created.`;
+  resultsSummary.textContent = `${generatedFiles.length} orders created, plus one Excel workbook with one sheet per order.`;
   generatedFiles.forEach(file => {
     const row = document.createElement('div');
     row.className = 'file-result';
@@ -164,12 +175,15 @@ downloadAllPdfs.addEventListener('click', () => generatedFiles.forEach(file => t
   url: file.pdfUrl,
   filename: file.pdf_filename,
 })));
+downloadExcel.addEventListener('click', () => {
+  if (generatedExcel) triggerDownload(generatedExcel);
+});
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
   const usedGoldFix = goldFixInput.value;
   message.className = 'message';
-  message.textContent = 'Reading products and preparing your CSV files…';
+  message.textContent = 'Reading products and preparing your CSV, PDF, and Excel files…';
   button.disabled = true;
   button.classList.add('working');
   try {
