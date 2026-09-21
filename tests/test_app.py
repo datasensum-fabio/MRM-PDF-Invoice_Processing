@@ -58,6 +58,27 @@ def test_pricing_formulas():
     assert application.item_price(other, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("13.50")
 
 
+def test_recognizes_french_gold_fineness_without_accepting_bare_numbers():
+    assert application.gold_carat("Ring 9K YG") == 9
+    assert application.gold_carat("Ring 9CT YG") == 9
+    assert application.gold_carat("Bo.créo di.syn F-VS 0.36ct or375b") == 9
+    assert application.gold_carat("Bracelet or 375 j") == 9
+    assert application.gold_carat("Ring 18K YG") == 18
+    assert application.gold_carat("Ring 18CT YG") == 18
+    assert application.gold_carat("Bracelet or750j") == 18
+    assert application.gold_carat("Bracelet or 750 b") == 18
+    assert application.gold_carat("Product 375") is None
+    assert application.gold_carat("Product 750") is None
+
+
+def test_or375_invoice_item_uses_9_carat_formula():
+    item = application.Item(
+        "Bo.créo di.syn F-VS 0.36ct or375b", "9KLGD292W", "", 1,
+        Decimal("1.30"), "t", Decimal("75.42"), Decimal("76.04"),
+    )
+    assert application.item_price(item, Decimal("58.85"), Decimal("35"), Decimal("27")) == Decimal("173.08")
+
+
 def test_uses_your_reference_when_reference_is_empty():
     item = application.parse_item(
         "Custom engraved pendant CLIENTREF 1 0,50 a 10,00 10,00 10,00"

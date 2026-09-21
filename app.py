@@ -29,6 +29,8 @@ MONEY = Decimal("0.01")
 NUMBER = re.compile(r"^-?\d+(?:[.,]\d+)?$")
 ORDER = re.compile(r"^Order\s+(.+?)\s+-\s+Ref\s*:\s*(.+?)\s*$", re.I)
 INVOICE = re.compile(r"Invoice\s+#(\d+)", re.I)
+NINE_CARAT = re.compile(r"(?<!\w)(?:9\s*(?:K|CT)\b|OR\s*375\s*[A-Z]?\b)", re.I)
+EIGHTEEN_CARAT = re.compile(r"(?<!\w)(?:18\s*(?:K|CT)\b|OR\s*750\s*[A-Z]?\b)", re.I)
 SKIP_PREFIXES = (
     "Description Your ref.", "Delivery address", "TOTAL VAT", "Subtotal", "Shipping costs",
     "Invoice ", "Total quantity", "Current balance", "Your current", "Gold still", "Please ",
@@ -122,14 +124,20 @@ def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
     return invoice_match.group(1), groups
 
 
+def gold_carat(description: str) -> int | None:
+    if EIGHTEEN_CARAT.search(description):
+        return 18
+    if NINE_CARAT.search(description):
+        return 9
+    return None
+
+
 def item_price(item: Item, gold_fix: Decimal, markup: Decimal, gold_markup: Decimal) -> Decimal:
-    description = item.description.upper()
-    is_18ct = "18CT" in description or "18K" in description
-    is_9ct = "9CT" in description or "9K" in description
-    if is_18ct or is_9ct:
+    carat = gold_carat(item.description)
+    if carat:
         value = item.supplier_unit * (Decimal("1") + gold_markup / Decimal("100"))
         if item.mode.lower() == "t":
-            gold_multiplier = Decimal("2") if is_18ct else Decimal("1")
+            gold_multiplier = Decimal("2") if carat == 18 else Decimal("1")
             value += gold_fix * item.metal * gold_multiplier / item.qty
     else:
         value = item.supplier_unit * (Decimal("1") + markup / Decimal("100"))
