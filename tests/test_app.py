@@ -79,6 +79,38 @@ def test_or375_invoice_item_uses_9_carat_formula():
     assert application.item_price(item, Decimal("58.85"), Decimal("35"), Decimal("27")) == Decimal("173.08")
 
 
+def test_invoice_metal_group_is_primary_and_follows_items_across_orders():
+    pdf_text = """Invoice #1234567
+Produits or 9ct
+Order WEB - Ref : SHARED
+Description without carat GOLD1 1 1,00 t 10,00 10,00 10,00
+Order WEB - Ref : GOLD-ONLY
+Another description GOLD2 1 1,00 t 10,00 10,00 10,00
+Produits argent
+Order WEB - Ref : SHARED
+Misleading 9K description SILVER1 1 1,00 t 10,00 10,00 10,00
+Produits or 18ct
+Order WEB - Ref : EIGHTEEN
+Description without carat GOLD3 1 1,00 t 10,00 10,00 10,00
+Produits plaqués or
+Order WEB - Ref : PLATED
+Misleading 18K description PLATED1 1 1,00 t 10,00 10,00 10,00
+"""
+    reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: pdf_text)])
+    with patch.object(application, "PdfReader", return_value=reader):
+        _, groups = application.extract_invoice(io.BytesIO(b"pdf"))
+
+    shared = groups["SHARED"].items
+    assert [item.invoice_carat for item in shared] == [9, 0]
+    assert application.item_price(shared[0], Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("77.90")
+    assert application.item_price(shared[1], Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("13.50")
+    assert groups["GOLD-ONLY"].items[0].invoice_carat == 9
+    eighteen = groups["EIGHTEEN"].items[0]
+    assert application.item_price(eighteen, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("143.10")
+    plated = groups["PLATED"].items[0]
+    assert application.item_price(plated, Decimal("65.20"), Decimal("35"), Decimal("27")) == Decimal("13.50")
+
+
 def test_uses_your_reference_when_reference_is_empty():
     item = application.parse_item(
         "Custom engraved pendant CLIENTREF 1 0,50 a 10,00 10,00 10,00"

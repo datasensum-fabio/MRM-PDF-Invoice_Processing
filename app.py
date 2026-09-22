@@ -31,6 +31,8 @@ ORDER = re.compile(r"^Order\s+(.+?)\s+-\s+Ref\s*:\s*(.+?)\s*$", re.I)
 INVOICE = re.compile(r"Invoice\s+#(\d+)", re.I)
 NINE_CARAT = re.compile(r"(?<!\w)(?:9\s*(?:K|CT)\b|OR\s*375\s*[A-Z]?\b)", re.I)
 EIGHTEEN_CARAT = re.compile(r"(?<!\w)(?:18\s*(?:K|CT)\b|OR\s*750\s*[A-Z]?\b)", re.I)
+PRODUCT_GROUP = re.compile(r"^Produits\b", re.I)
+SOLID_GOLD_GROUP = re.compile(r"^Produits\s+or\s+(9|18)\s*ct\s*$", re.I)
 SKIP_PREFIXES = (
     "Description Your ref.", "Delivery address", "TOTAL VAT", "Subtotal", "Shipping costs",
     "Invoice ", "Total quantity", "Current balance", "Your current", "Gold still", "Please ",
@@ -51,6 +53,7 @@ class Item:
     mode: str
     labour: Decimal
     supplier_unit: Decimal
+    invoice_carat: int | None = None
 
 
 @dataclass
@@ -64,7 +67,7 @@ def decimal_value(value: str) -> Decimal:
     return Decimal(value.replace(" ", "").replace(",", "."))
 
 
-def parse_item(line: str) -> Item | None:
+def parse_item(line: str, invoice_carat: int | None = None) -> Item | None:
     tokens = line.split()
     mode_index = next((i for i in range(len(tokens) - 1, -1, -1) if tokens[i].lower() in {"a", "t", "c"}), -1)
     if mode_index < 3 or len(tokens) - mode_index not in {3, 4}:
@@ -91,7 +94,10 @@ def parse_item(line: str) -> Item | None:
     description = " ".join(tokens[:ref_index]).strip()
     labour = decimal_value(after[0])
     supplier_unit = decimal_value(after[-2] if len(after) == 3 else after[0])
-    return Item(description, reference, size, qty, metal, tokens[mode_index].lower(), labour, supplier_unit)
+    return Item(
+        description, reference, size, qty, metal, tokens[mode_index].lower(),
+        labour, supplier_unit, invoice_carat,
+    )
 
 
 def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
@@ -102,8 +108,13 @@ def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
         raise ValueError("The PDF does not contain a recognizable invoice number.")
     groups: OrderedDict[str, OrderGroup] = OrderedDict()
     current_ref: str | None = None
+    current_invoice_carat: int | None = None
     for raw_line in text.splitlines():
         line = " ".join(raw_line.split()).strip()
+        if PRODUCT_GROUP.match(line):
+            gold_group = SOLID_GOLD_GROUP.match(line)
+            current_invoice_carat = int(gold_group.group(1)) if gold_group else 0
+            continue
         order_match = ORDER.match(line)
         if order_match:
             current_ref = order_match.group(2).strip().split()[0]
@@ -115,7 +126,7 @@ def extract_invoice(pdf_stream) -> tuple[str, OrderedDict[str, OrderGroup]]:
             continue
         if not current_ref or not line or line.startswith(SKIP_PREFIXES):
             continue
-        item = parse_item(line)
+        item = parse_item(line, current_invoice_carat)
         if item:
             groups[current_ref].items.append(item)
     groups = OrderedDict((ref, group) for ref, group in groups.items() if group.items)
@@ -133,7 +144,7 @@ def gold_carat(description: str) -> int | None:
 
 
 def item_price(item: Item, gold_fix: Decimal, markup: Decimal, gold_markup: Decimal) -> Decimal:
-    carat = gold_carat(item.description)
+    carat = item.invoice_carat if item.invoice_carat is not None else gold_carat(item.description)
     if carat:
         value = item.supplier_unit * (Decimal("1") + gold_markup / Decimal("100"))
         if item.mode.lower() == "t":
