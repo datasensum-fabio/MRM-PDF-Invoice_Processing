@@ -144,7 +144,7 @@ def test_process_returns_one_csv_per_order_ref():
     assert selected["item_count"] == 2
     sample = base64.b64decode(selected["content_base64"]).decode("utf-8-sig")
     pdf = base64.b64decode(selected["pdf_base64"])
-    assert selected["pdf_filename"] == "invoice_4690899_WEB235520.0182.pdf"
+    assert selected["pdf_filename"] == "Delivery Note_4690899_WEB235520.0182.pdf"
     assert pdf.startswith(b"%PDF-")
     pdf_reader = PdfReader(io.BytesIO(pdf))
     assert all(float(page.mediabox.height) > float(page.mediabox.width) for page in pdf_reader.pages)

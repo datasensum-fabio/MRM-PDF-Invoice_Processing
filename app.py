@@ -382,7 +382,7 @@ def process_invoice():
                 "order_ref": group.label,
                 "filename": f"invoice_{invoice}_{safe_name(order_ref)}.csv",
                 "content_base64": base64.b64encode(content).decode("ascii"),
-                "pdf_filename": f"invoice_{invoice}_{safe_name(order_ref)}.pdf",
+                "pdf_filename": f"Delivery Note_{invoice}_{safe_name(order_ref)}.pdf",
                 "pdf_base64": base64.b64encode(pdf_content).decode("ascii"),
                 "item_count": len(group.items),
                 "preview_rows": csv_rows_for_order(invoice, group, gold_fix, markup, gold_markup),
